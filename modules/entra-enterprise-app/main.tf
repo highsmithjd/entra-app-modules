@@ -66,8 +66,6 @@ resource "azuread_service_principal" "this" {
     custom_single_sign_on = true
   }
 
-  tags = var.tags
-
   owners = distinct(concat(
     [data.azuread_client_config.current.object_id],
     var.owners
