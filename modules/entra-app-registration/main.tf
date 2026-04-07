@@ -138,7 +138,6 @@ resource "azuread_application_certificate" "this" {
   count = var.client_certificate_enabled ? 1 : 0
 
   application_id = azuread_application.this.id
-  display_name   = var.client_certificate_display_name
   type           = "AsymmetricX509Cert"
   value          = var.client_certificate_value
   end_date       = var.client_certificate_expiry
