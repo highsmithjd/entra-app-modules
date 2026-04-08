@@ -420,3 +420,4 @@ Full working examples are in the [`examples/`](examples/) directory:
 
 - [`examples/enterprise-app-saml/`](examples/enterprise-app-saml/) — SAML Enterprise App with group assignments
 - [`examples/app-registration-oidc/`](examples/app-registration-oidc/) — Web app, daemon with cert, and GitHub Actions federated auth
+- [`examples/multi-env-web-app/`](examples/multi-env-web-app/) — Web app across sbx and prod environments with a shared resource group and independent Terraform state per environment
