@@ -44,3 +44,13 @@ output "client_secret_expiry" {
   description = "The expiry date of the client secret. Null if not created."
   value       = var.client_secret_enabled ? local.secret_end_date : null
 }
+
+output "key_vault_uri" {
+  description = "The URI of the Key Vault. Null if create_key_vault is false."
+  value       = var.create_key_vault ? azurerm_key_vault.this[0].vault_uri : null
+}
+
+output "key_vault_secret_name" {
+  description = "The name of the client secret in Key Vault. Null if create_key_vault or client_secret_enabled is false."
+  value       = var.create_key_vault && var.client_secret_enabled ? azurerm_key_vault_secret.client_secret[0].name : null
+}

@@ -7,6 +7,11 @@ locals {
   is_spa            = var.flow_type == "spa"
   is_mobile_desktop = var.flow_type == "mobile_desktop"
   # daemon flow has no redirect URIs
+
+  # Key Vault naming — lowercase, hyphens only, max 24 chars total
+  app_slug   = lower(replace(var.app_name, " ", "-"))
+  vault_name = "kv-dg-${local.app_slug}"
+  rg_name    = "rg-dg-${local.app_slug}"
 }
 
 resource "time_static" "now" {}
@@ -130,23 +135,72 @@ resource "azuread_application_password" "this" {
 }
 
 # ---------------------------------------------------------------------------
-# Key Vault secret — write client secret to vault after creation
+# Key Vault — optional, one per app, co-located with the app registration
 # ---------------------------------------------------------------------------
 
+data "azurerm_client_config" "current" {}
+
+resource "azurerm_resource_group" "this" {
+  count    = var.create_key_vault ? 1 : 0
+  name     = local.rg_name
+  location = var.key_vault_location
+
+  tags = {
+    managed-by = "terraform"
+    app        = local.full_name
+  }
+}
+
+resource "azurerm_key_vault" "this" {
+  count               = var.create_key_vault ? 1 : 0
+  name                = local.vault_name
+  resource_group_name = azurerm_resource_group.this[0].name
+  location            = azurerm_resource_group.this[0].location
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  sku_name            = "standard"
+
+  rbac_authorization_enabled = true
+
+  soft_delete_retention_days = var.key_vault_soft_delete_retention_days
+  purge_protection_enabled   = var.key_vault_purge_protection_enabled
+
+  tags = {
+    managed-by = "terraform"
+    app        = local.full_name
+  }
+}
+
+# Terraform SP always gets Secrets Officer so it can write secrets
+resource "azurerm_role_assignment" "terraform_secrets_officer" {
+  count                = var.create_key_vault ? 1 : 0
+  scope                = azurerm_key_vault.this[0].id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+
+# App identities that need to read secrets at runtime
+resource "azurerm_role_assignment" "secret_reader" {
+  for_each             = var.create_key_vault ? toset(var.key_vault_secret_readers) : toset([])
+  scope                = azurerm_key_vault.this[0].id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = each.value
+}
+
+# Write client secret to vault when both are enabled
 resource "azurerm_key_vault_secret" "client_secret" {
-  count = var.client_secret_enabled && var.key_vault_id != null ? 1 : 0
-
-  name         = "${lower(replace(var.app_name, " ", "-"))}-client-secret"
-  value        = azuread_application_password.this[0].value
-  key_vault_id = var.key_vault_id
-
+  count           = var.create_key_vault && var.client_secret_enabled ? 1 : 0
+  name            = "${local.app_slug}-client-secret"
+  value           = azuread_application_password.this[0].value
+  key_vault_id    = azurerm_key_vault.this[0].id
   content_type    = "application/x-client-secret"
   expiration_date = local.secret_end_date
 
   tags = {
-    app          = "DG-${var.app_name}"
-    managed-by   = "terraform"
+    managed-by = "terraform"
+    app        = local.full_name
   }
+
+  depends_on = [azurerm_role_assignment.terraform_secrets_officer]
 }
 
 # ---------------------------------------------------------------------------

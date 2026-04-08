@@ -53,6 +53,50 @@ variable "saml_certificate_display_name" {
 }
 
 # ---------------------------------------------------------------------------
+# Key Vault
+# ---------------------------------------------------------------------------
+
+variable "create_key_vault" {
+  description = <<-EOT
+    When true, creates a dedicated Azure Key Vault and resource group for this app.
+    The vault is named 'kv-dg-<app_name>' and the resource group 'rg-dg-<app_name>'.
+    Client secrets are automatically written to the vault when client_secret_enabled is also true.
+    The vault and resource group are destroyed when the app is destroyed.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "key_vault_location" {
+  description = "Azure region for the Key Vault and resource group. Only used when create_key_vault is true."
+  type        = string
+  default     = "centralus"
+}
+
+variable "key_vault_soft_delete_retention_days" {
+  description = "Days to retain soft-deleted vault objects (7-90). Only used when create_key_vault is true."
+  type        = number
+  default     = 90
+
+  validation {
+    condition     = var.key_vault_soft_delete_retention_days >= 7 && var.key_vault_soft_delete_retention_days <= 90
+    error_message = "key_vault_soft_delete_retention_days must be between 7 and 90."
+  }
+}
+
+variable "key_vault_purge_protection_enabled" {
+  description = "Prevent permanent deletion of the vault during the soft delete retention period. Only used when create_key_vault is true."
+  type        = bool
+  default     = true
+}
+
+variable "key_vault_secret_readers" {
+  description = "List of Entra object IDs granted Key Vault Secrets User (read-only) on the app vault. Only used when create_key_vault is true."
+  type        = list(string)
+  default     = []
+}
+
+# ---------------------------------------------------------------------------
 # Client Secret (uncommon for SAML but occasionally needed for back-channel calls)
 # ---------------------------------------------------------------------------
 
