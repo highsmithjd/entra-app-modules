@@ -11,7 +11,10 @@ locals {
   # Key Vault naming — lowercase, hyphens only, max 24 chars total
   app_slug   = lower(replace(var.app_name, " ", "-"))
   vault_name = "kv-dg-${local.app_slug}"
-  rg_name    = "rg-dg-${local.app_slug}"
+
+  # Use the provided resource group name or auto-generate one
+  rg_name        = coalesce(var.key_vault_resource_group_name, "rg-dg-${local.app_slug}")
+  create_rg      = var.create_key_vault && var.key_vault_resource_group_name == null
 }
 
 resource "time_static" "now" {}
@@ -141,7 +144,7 @@ resource "azuread_application_password" "this" {
 data "azurerm_client_config" "current" {}
 
 resource "azurerm_resource_group" "this" {
-  count    = var.create_key_vault ? 1 : 0
+  count    = local.create_rg ? 1 : 0
   name     = local.rg_name
   location = var.key_vault_location
 
@@ -154,8 +157,8 @@ resource "azurerm_resource_group" "this" {
 resource "azurerm_key_vault" "this" {
   count               = var.create_key_vault ? 1 : 0
   name                = local.vault_name
-  resource_group_name = azurerm_resource_group.this[0].name
-  location            = azurerm_resource_group.this[0].location
+  resource_group_name = local.rg_name
+  location            = var.key_vault_location
   tenant_id           = data.azurerm_client_config.current.tenant_id
   sku_name            = "standard"
 
