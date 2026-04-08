@@ -38,7 +38,7 @@ resource "azurerm_key_vault" "this" {
 
   # RBAC mode — access is controlled via Azure role assignments, not vault
   # access policies. This is the recommended modern approach.
-  enable_rbac_authorization = true
+  rbac_authorization_enabled = true
 
   soft_delete_retention_days = var.soft_delete_retention_days
   purge_protection_enabled   = var.purge_protection_enabled
