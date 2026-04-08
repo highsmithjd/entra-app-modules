@@ -58,6 +58,21 @@ variable "id_token_issuance_enabled" {
 }
 
 # ---------------------------------------------------------------------------
+# Key Vault Integration
+# ---------------------------------------------------------------------------
+
+variable "key_vault_id" {
+  description = <<-EOT
+    Resource ID of the Azure Key Vault to store the client secret in after creation.
+    When set, Terraform will write the secret value to Key Vault under the key
+    '<app_name>-client-secret'. The Terraform SP must have Key Vault Secrets Officer
+    on the vault. If null, the secret is only stored in Terraform state.
+  EOT
+  type        = string
+  default     = null
+}
+
+# ---------------------------------------------------------------------------
 # Client Secret
 # ---------------------------------------------------------------------------
 

@@ -34,6 +34,11 @@ output "client_secret_expiry" {
   value       = var.client_secret_enabled ? local.secret_end_date : null
 }
 
+output "key_vault_secret_name" {
+  description = "The name of the secret in Key Vault. Null if Key Vault integration is not enabled."
+  value       = var.client_secret_enabled && var.key_vault_id != null ? azurerm_key_vault_secret.client_secret[0].name : null
+}
+
 output "federated_credential_ids" {
   description = "Map of federated credential names to their IDs."
   value = {
