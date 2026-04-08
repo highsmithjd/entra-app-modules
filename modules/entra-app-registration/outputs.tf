@@ -44,6 +44,21 @@ output "key_vault_secret_name" {
   value       = var.create_key_vault && var.client_secret_enabled ? azurerm_key_vault_secret.client_secret[0].name : null
 }
 
+output "key_vault_certificate_name" {
+  description = "Name of the certificate in Key Vault. Null if not created by the module."
+  value       = local.create_kv_cert ? azurerm_key_vault_certificate.this[0].name : null
+}
+
+output "key_vault_certificate_thumbprint" {
+  description = "Thumbprint of the generated certificate. Null if not created by the module."
+  value       = local.create_kv_cert ? azurerm_key_vault_certificate.this[0].thumbprint : null
+}
+
+output "key_vault_certificate_expiry" {
+  description = "Expiry date of the generated certificate. Null if not created by the module."
+  value       = local.create_kv_cert ? azurerm_key_vault_certificate.this[0].certificate_attribute[0].expires : null
+}
+
 output "federated_credential_ids" {
   description = "Map of federated credential names to their IDs."
   value = {
