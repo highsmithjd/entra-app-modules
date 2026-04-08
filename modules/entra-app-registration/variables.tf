@@ -225,6 +225,49 @@ variable "app_roles" {
 }
 
 # ---------------------------------------------------------------------------
+# Key Vault-managed certificate
+# ---------------------------------------------------------------------------
+
+variable "create_key_vault_certificate" {
+  description = <<-EOT
+    When true, generates a self-signed RSA certificate in the app's Key Vault and
+    uploads the public key to Entra as an application credential. The PFX (including
+    private key) can be exported from Key Vault and sent to the consuming application.
+    Requires create_key_vault = true. Cannot be combined with client_certificate_enabled.
+  EOT
+  type    = bool
+  default = false
+}
+
+variable "key_vault_certificate_subject" {
+  description = "Subject DN for the generated certificate. Defaults to 'CN=DG-<app_name>'."
+  type        = string
+  default     = null
+}
+
+variable "key_vault_certificate_validity_months" {
+  description = "Validity period for the generated certificate in months."
+  type        = number
+  default     = 12
+
+  validation {
+    condition     = var.key_vault_certificate_validity_months > 0 && var.key_vault_certificate_validity_months <= 120
+    error_message = "key_vault_certificate_validity_months must be between 1 and 120."
+  }
+}
+
+variable "key_vault_certificate_key_size" {
+  description = "RSA key size for the generated certificate. Must be 2048 or 4096."
+  type        = number
+  default     = 2048
+
+  validation {
+    condition     = contains([2048, 4096], var.key_vault_certificate_key_size)
+    error_message = "key_vault_certificate_key_size must be 2048 or 4096."
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Federated Identity Credentials (OIDC — no secrets needed)
 # ---------------------------------------------------------------------------
 
