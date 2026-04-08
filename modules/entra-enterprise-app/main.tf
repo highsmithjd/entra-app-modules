@@ -2,9 +2,12 @@ locals {
   full_name         = "DG-${var.app_name}"
   cert_display_name = coalesce(var.saml_certificate_display_name, "CN=${local.full_name}")
   secret_end_date   = timeadd(time_static.now.rfc3339, "${var.client_secret_expiry_days * 24}h")
-  app_slug          = lower(replace(var.app_name, " ", "-"))
-  vault_name        = "kv-dg-${local.app_slug}"
-  rg_name           = "rg-dg-${local.app_slug}"
+  app_slug   = lower(replace(var.app_name, " ", "-"))
+  vault_name = "kv-dg-${local.app_slug}"
+
+  # Use the provided resource group name or auto-generate one
+  rg_name   = coalesce(var.key_vault_resource_group_name, "rg-dg-${local.app_slug}")
+  create_rg = var.create_key_vault && var.key_vault_resource_group_name == null
 }
 
 # Used to calculate a stable expiry date at apply time without perpetual drift
@@ -123,7 +126,7 @@ resource "azuread_application_password" "this" {
 data "azurerm_client_config" "current" {}
 
 resource "azurerm_resource_group" "this" {
-  count    = var.create_key_vault ? 1 : 0
+  count    = local.create_rg ? 1 : 0
   name     = local.rg_name
   location = var.key_vault_location
 
@@ -136,8 +139,8 @@ resource "azurerm_resource_group" "this" {
 resource "azurerm_key_vault" "this" {
   count               = var.create_key_vault ? 1 : 0
   name                = local.vault_name
-  resource_group_name = azurerm_resource_group.this[0].name
-  location            = azurerm_resource_group.this[0].location
+  resource_group_name = local.rg_name
+  location            = var.key_vault_location
   tenant_id           = data.azurerm_client_config.current.tenant_id
   sku_name            = "standard"
 

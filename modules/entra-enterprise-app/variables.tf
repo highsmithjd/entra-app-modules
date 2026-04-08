@@ -58,13 +58,25 @@ variable "saml_certificate_display_name" {
 
 variable "create_key_vault" {
   description = <<-EOT
-    When true, creates a dedicated Azure Key Vault and resource group for this app.
-    The vault is named 'kv-dg-<app_name>' and the resource group 'rg-dg-<app_name>'.
-    Client secrets are automatically written to the vault when client_secret_enabled is also true.
-    The vault and resource group are destroyed when the app is destroyed.
+    When true, creates a dedicated Azure Key Vault for this app.
+    The vault is named 'kv-dg-<app_name>'. Client secrets are automatically
+    written to the vault when client_secret_enabled is also true.
+    The vault is destroyed when the app is destroyed.
   EOT
   type        = bool
   default     = false
+}
+
+variable "key_vault_resource_group_name" {
+  description = <<-EOT
+    Name of the resource group to place the Key Vault in. When set, the module
+    uses this existing resource group instead of creating one. Recommended: use a
+    shared resource group per app (e.g. 'rg-dg-compms') so dev and prod vaults
+    land in the same group and are destroyed together when the app is retired.
+    When null, a resource group named 'rg-dg-<app_name>' is created automatically.
+  EOT
+  type        = string
+  default     = null
 }
 
 variable "key_vault_location" {
