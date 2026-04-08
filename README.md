@@ -5,7 +5,7 @@ Terraform modules for deploying Microsoft Entra ID (Azure AD) applications.
 - **[entra-enterprise-app](#module-entra-enterprise-app)** — SAML Enterprise Applications (for SaaS vendors like Google, Oracle, Salesforce, etc.)
 - **[entra-app-registration](#module-entra-app-registration)** — OAuth 2.0 / OIDC App Registrations (for internal apps, APIs, daemons, and CI/CD pipelines)
 
-All apps are automatically prefixed with `DG-`. When `create_key_vault = true`, each module creates a dedicated Key Vault (`kv-dg-<app_name>`) and resource group (`rg-dg-<app_name>`) alongside the app.
+All apps are automatically prefixed with `DG-`. Both modules support an optional Key Vault for secret and certificate storage — see [Key Vault](#key-vault) below.
 
 ---
 
@@ -224,6 +224,110 @@ module "github_actions_app" {
 | `client_secret` | Client secret value (null if not created) | yes |
 | `client_secret_expiry` | Client secret expiry date | no |
 | `federated_credential_ids` | Map of federated credential names to IDs | no |
+
+---
+
+## Key Vault
+
+Both modules support an optional Azure Key Vault per app. When enabled, the module creates the vault and grants the Terraform service principal the necessary roles automatically.
+
+### Basic usage
+
+```hcl
+module "app" {
+  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-app-registration?ref=v1.4.0"
+
+  app_name = "MyApp"
+
+  create_key_vault = true
+  # Vault is named kv-dg-myapp and placed in rg-dg-myapp (auto-created)
+}
+```
+
+### Shared resource group
+
+By default the module creates a resource group named `rg-dg-<app_slug>` alongside the vault. For multi-environment deployments (sbx/prod), use a **shared resource group** managed independently so that destroying one environment cannot affect another.
+
+```hcl
+# shared/main.tf — owns the resource group, applied first
+resource "azurerm_resource_group" "shared" {
+  name     = "rg-dg-myapp"
+  location = "centralus"
+}
+
+# sbx/main.tf and prod/main.tf — reference it by name
+module "app" {
+  source = "..."
+
+  create_key_vault              = true
+  key_vault_resource_group_name = "rg-dg-myapp"  # module uses this, doesn't create it
+}
+```
+
+Deprovisioning order when retiring an app: `destroy prod → destroy sbx → destroy shared`.
+
+### Client secret storage
+
+When both `create_key_vault = true` and `client_secret_enabled = true`, the client secret is automatically written to the vault as `<app_slug>-client-secret`.
+
+### Key Vault-managed certificates
+
+When `create_key_vault_certificate = true`, the module generates a self-signed RSA certificate inside Key Vault and uploads the public key to Entra automatically. The private key never leaves Key Vault.
+
+```hcl
+module "app" {
+  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-app-registration?ref=v1.4.0"
+
+  app_name = "MyApp"
+
+  create_key_vault             = true
+  create_key_vault_certificate = true
+
+  key_vault_certificate_validity_months = 12   # default
+  key_vault_certificate_key_size        = 2048 # default, or 4096
+  key_vault_certificate_subject         = "CN=MyApp" # defaults to CN=DG-<app_name>
+}
+```
+
+To export the PFX after apply (e.g. to send to a vendor):
+
+```bash
+az keyvault secret download \
+  --vault-name kv-dg-myapp \
+  --name myapp-cert \
+  --file myapp.pfx \
+  --encoding base64
+```
+
+### Key Vault variables (both modules)
+
+| Name | Description | Type | Default |
+|---|---|---|---|
+| `create_key_vault` | Create a dedicated Key Vault for this app. | `bool` | `false` |
+| `key_vault_resource_group_name` | Use an existing resource group instead of creating one. | `string` | `null` |
+| `key_vault_location` | Azure region for the vault. | `string` | `"centralus"` |
+| `key_vault_soft_delete_retention_days` | Soft delete retention (7–90 days). | `number` | `90` |
+| `key_vault_purge_protection_enabled` | Prevent permanent deletion during retention period. | `bool` | `true` |
+| `key_vault_secret_readers` | Object IDs granted `Key Vault Secrets User` on the vault. | `list(string)` | `[]` |
+
+### Key Vault certificate variables (entra-app-registration only)
+
+| Name | Description | Type | Default |
+|---|---|---|---|
+| `create_key_vault_certificate` | Generate a self-signed cert in Key Vault and upload to Entra. Requires `create_key_vault = true`. | `bool` | `false` |
+| `key_vault_certificate_subject` | Subject DN. Defaults to `CN=DG-<app_name>`. | `string` | `null` |
+| `key_vault_certificate_validity_months` | Validity period in months (1–120). | `number` | `12` |
+| `key_vault_certificate_key_size` | RSA key size: `2048` or `4096`. | `number` | `2048` |
+
+### Key Vault outputs (entra-app-registration)
+
+| Name | Description |
+|---|---|
+| `key_vault_uri` | URI of the Key Vault. |
+| `key_vault_secret_name` | Name of the client secret in Key Vault. |
+| `key_vault_certificate_name` | Name of the generated certificate in Key Vault. |
+| `key_vault_certificate_thumbprint` | Thumbprint of the generated certificate. |
+| `key_vault_certificate_expiry` | Expiry date of the generated certificate. |
 
 ---
 
