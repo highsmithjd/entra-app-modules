@@ -246,7 +246,7 @@ module "app" {
 
 ### Shared resource group
 
-By default the module creates a resource group named `rg-dg-<app_slug>` alongside the vault. For multi-environment deployments (sbx/prod), use a **shared resource group** managed independently so that destroying one environment cannot affect another.
+When `key_vault_resource_group_name` is not set, the module creates a resource group named `rg-dg-<app_slug>` alongside the vault. For multi-environment deployments (sbx/prod), use a **shared resource group** managed independently so that destroying one environment cannot affect another.
 
 ```hcl
 # shared/main.tf — owns the resource group, applied first
