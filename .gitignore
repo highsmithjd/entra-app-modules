@@ -1,0 +1,10 @@
+# Claude Code local settings
+.claude/
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfplan
+tfplan
+*.tfstate
+*.tfstate.backup
