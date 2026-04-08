@@ -130,6 +130,26 @@ resource "azuread_application_password" "this" {
 }
 
 # ---------------------------------------------------------------------------
+# Key Vault secret — write client secret to vault after creation
+# ---------------------------------------------------------------------------
+
+resource "azurerm_key_vault_secret" "client_secret" {
+  count = var.client_secret_enabled && var.key_vault_id != null ? 1 : 0
+
+  name         = "${lower(replace(var.app_name, " ", "-"))}-client-secret"
+  value        = azuread_application_password.this[0].value
+  key_vault_id = var.key_vault_id
+
+  content_type    = "application/x-client-secret"
+  expiration_date = local.secret_end_date
+
+  tags = {
+    app          = "DG-${var.app_name}"
+    managed-by   = "terraform"
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Client certificate
 # ---------------------------------------------------------------------------
 
