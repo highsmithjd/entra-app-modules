@@ -1,7 +1,10 @@
 locals {
-  full_name            = "DG-${var.app_name}"
-  cert_display_name    = coalesce(var.saml_certificate_display_name, "CN=${local.full_name}")
-  secret_end_date      = timeadd(time_static.now.rfc3339, "${var.client_secret_expiry_days * 24}h")
+  full_name         = "DG-${var.app_name}"
+  cert_display_name = coalesce(var.saml_certificate_display_name, "CN=${local.full_name}")
+  secret_end_date   = timeadd(time_static.now.rfc3339, "${var.client_secret_expiry_days * 24}h")
+  app_slug          = lower(replace(var.app_name, " ", "-"))
+  vault_name        = "kv-dg-${local.app_slug}"
+  rg_name           = "rg-dg-${local.app_slug}"
 }
 
 # Used to calculate a stable expiry date at apply time without perpetual drift
@@ -111,6 +114,72 @@ resource "azuread_application_password" "this" {
   application_id = azuread_application.this.id
   display_name   = var.client_secret_display_name
   end_date       = local.secret_end_date
+}
+
+# ---------------------------------------------------------------------------
+# Key Vault — optional, one per app, co-located with the app
+# ---------------------------------------------------------------------------
+
+data "azurerm_client_config" "current" {}
+
+resource "azurerm_resource_group" "this" {
+  count    = var.create_key_vault ? 1 : 0
+  name     = local.rg_name
+  location = var.key_vault_location
+
+  tags = {
+    managed-by = "terraform"
+    app        = local.full_name
+  }
+}
+
+resource "azurerm_key_vault" "this" {
+  count               = var.create_key_vault ? 1 : 0
+  name                = local.vault_name
+  resource_group_name = azurerm_resource_group.this[0].name
+  location            = azurerm_resource_group.this[0].location
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  sku_name            = "standard"
+
+  rbac_authorization_enabled = true
+
+  soft_delete_retention_days = var.key_vault_soft_delete_retention_days
+  purge_protection_enabled   = var.key_vault_purge_protection_enabled
+
+  tags = {
+    managed-by = "terraform"
+    app        = local.full_name
+  }
+}
+
+resource "azurerm_role_assignment" "terraform_secrets_officer" {
+  count                = var.create_key_vault ? 1 : 0
+  scope                = azurerm_key_vault.this[0].id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+
+resource "azurerm_role_assignment" "secret_reader" {
+  for_each             = var.create_key_vault ? toset(var.key_vault_secret_readers) : toset([])
+  scope                = azurerm_key_vault.this[0].id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = each.value
+}
+
+resource "azurerm_key_vault_secret" "client_secret" {
+  count           = var.create_key_vault && var.client_secret_enabled ? 1 : 0
+  name            = "${local.app_slug}-client-secret"
+  value           = azuread_application_password.this[0].value
+  key_vault_id    = azurerm_key_vault.this[0].id
+  content_type    = "application/x-client-secret"
+  expiration_date = local.secret_end_date
+
+  tags = {
+    managed-by = "terraform"
+    app        = local.full_name
+  }
+
+  depends_on = [azurerm_role_assignment.terraform_secrets_officer]
 }
 
 # ---------------------------------------------------------------------------
