@@ -13,16 +13,13 @@ provider "azurerm" {
   features {}
 }
 
-# ---------------------------------------------------------------------------
-# Shared resource group
+# Shared resource group for all MyWebApp Key Vaults.
 #
-# This is the only resource in this environment. It owns the resource group
-# that all environments' Key Vaults will live in. Managing it separately
-# means no single environment's destroy can take out another's Key Vault.
+# Managed independently so that destroying sbx or prod cannot take out
+# another environment's Key Vault.
 #
 # Apply this before sbx or prod.
-# Destroy this LAST — only after both sbx and prod have been destroyed.
-# ---------------------------------------------------------------------------
+# Destroy this LAST — only after all environments have been destroyed.
 resource "azurerm_resource_group" "shared" {
   name     = "rg-dg-mywebapp"
   location = "centralus"

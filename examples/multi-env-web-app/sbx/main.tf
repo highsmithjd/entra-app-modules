@@ -16,8 +16,7 @@ terraform {
     }
   }
 
-  # Replace with your backend configuration (e.g. azurerm, http, s3)
-  backend "http" {}
+
 }
 
 provider "azuread" {}

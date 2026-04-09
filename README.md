@@ -246,7 +246,9 @@ module "app" {
 
 ### Shared resource group
 
-When `key_vault_resource_group_name` is not set, the module creates a resource group named `rg-dg-<app_slug>` alongside the vault. For multi-environment deployments (sbx/prod), use a **shared resource group** managed independently so that destroying one environment cannot affect another.
+Always manage the Azure resource group in a separate `shared/` Terraform root with its own state — even if you only have one environment today. This is the standard pattern across all apps.
+
+When `key_vault_resource_group_name` is not set, the module creates a resource group named `rg-dg-<app_slug>` alongside the vault. If the resource group is owned by `sbx`, destroying `sbx` would delete it — taking any future `prod` Key Vault with it. Owning the resource group in `shared/` means no single environment can destroy it accidentally.
 
 ```hcl
 # shared/main.tf — owns the resource group, applied first
@@ -263,6 +265,8 @@ module "app" {
   key_vault_resource_group_name = "rg-dg-myapp"  # module uses this, doesn't create it
 }
 ```
+
+Apply order: `shared` first, then `sbx` and `prod` in any order.
 
 Deprovisioning order when retiring an app: `destroy prod → destroy sbx → destroy shared`.
 
@@ -416,8 +420,8 @@ Client secret values are stored in Terraform state. Ensure your state backend is
 
 ## Examples
 
-Full working examples are in the [`examples/`](examples/) directory:
+Full working examples are in the [`examples/`](examples/) directory. All examples follow the standard directory structure with a `shared/` root that owns the Azure resource group, and per-environment roots (`sbx/`, `prod/`) that own the app registration and Key Vault.
 
-- [`examples/enterprise-app-saml/`](examples/enterprise-app-saml/) — SAML Enterprise App with group assignments
-- [`examples/app-registration-oidc/`](examples/app-registration-oidc/) — Web app, daemon with cert, and GitHub Actions federated auth
-- [`examples/multi-env-web-app/`](examples/multi-env-web-app/) — Web app across sbx and prod environments with a shared resource group and independent Terraform state per environment
+- [`examples/enterprise-app-saml/`](examples/enterprise-app-saml/) — SAML Enterprise App with group assignments (`shared/` + `sbx/`)
+- [`examples/app-registration-oidc/`](examples/app-registration-oidc/) — OIDC web app with client secret and Key Vault (`shared/` + `sbx/`)
+- [`examples/multi-env-web-app/`](examples/multi-env-web-app/) — Web app across sbx and prod with independent Terraform state per environment (`shared/` + `sbx/` + `prod/`)

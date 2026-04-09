@@ -17,9 +17,11 @@ Each directory has its own Terraform state, so environments are fully isolated. 
 
 ## Why a shared directory?
 
-Both `sbx` and `prod` create a Key Vault. Azure Key Vaults must live in a resource group. If one environment owned the resource group, destroying that environment would delete the resource group — and every other environment's Key Vault with it.
+Every app deployment uses a `shared/` directory to own the Azure resource group. This is the standard pattern — even if you start with only `sbx`.
 
-By giving the resource group its own Terraform state in `shared/`, no single environment can destroy it accidentally. The `destroy:shared` job should only be run when retiring the app entirely, after all other environments have been destroyed.
+Key Vaults must live in a resource group. If one environment owned the resource group, destroying that environment would delete the resource group — and every other environment's Key Vault with it. By giving the resource group its own Terraform state in `shared/`, no single environment can destroy it accidentally.
+
+Start with `shared/` from day one. Adding `prod/` later is straightforward; untangling a resource group from an existing environment's state is not. The `destroy:shared` job should only be run when retiring the app entirely, after all other environments have been destroyed.
 
 ## Apply order
 
