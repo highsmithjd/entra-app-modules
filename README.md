@@ -303,6 +303,15 @@ az keyvault secret download \
   --encoding base64
 ```
 
+Key Vault generates the PFX with an empty password. **Always password-protect it before sending to a vendor.** Re-encrypt with a password after downloading:
+
+```bash
+openssl pkcs12 -in myapp.pfx -out myapp-protected.pfx \
+  --export -passout pass:YourPasswordHere
+```
+
+Share the password with the vendor out-of-band — not in the same message as the file.
+
 ### Key Vault variables (both modules)
 
 | Name | Description | Type | Default |
