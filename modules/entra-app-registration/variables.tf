@@ -239,6 +239,36 @@ variable "create_key_vault_certificate" {
   default = false
 }
 
+variable "key_vault_certificate_slots" {
+  description = <<-EOT
+    Named slots for Key Vault-managed certificates. Each slot creates an independent
+    certificate in Key Vault and registers its public key in Entra. All slots are
+    valid simultaneously, enabling zero-downtime rotation.
+
+    Normal operation (single cert):
+      key_vault_certificate_slots = ["primary"]
+
+    During rotation (both certs active — give the vendor the new cert first):
+      key_vault_certificate_slots = ["primary", "secondary"]
+
+    After vendor confirms the new cert works (remove the old one):
+      key_vault_certificate_slots = ["secondary"]
+
+    Slot names become part of the Key Vault certificate name:
+      "primary"   → <app_slug>-cert-primary
+      "secondary" → <app_slug>-cert-secondary
+
+    Requires create_key_vault_certificate = true.
+  EOT
+  type    = list(string)
+  default = ["primary"]
+
+  validation {
+    condition     = length(var.key_vault_certificate_slots) > 0
+    error_message = "key_vault_certificate_slots must have at least one entry."
+  }
+}
+
 variable "key_vault_certificate_subject" {
   description = "Subject DN for the generated certificate. Defaults to 'CN=DG-<app_name>'."
   type        = string

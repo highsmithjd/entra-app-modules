@@ -328,6 +328,7 @@ Share the password with the vendor out-of-band — not in the same message as th
 | Name | Description | Type | Default |
 |---|---|---|---|
 | `create_key_vault_certificate` | Generate a self-signed cert in Key Vault and upload to Entra. Requires `create_key_vault = true`. | `bool` | `false` |
+| `key_vault_certificate_slots` | Named certificate slots. See [Certificate rotation](#certificate-rotation). | `list(string)` | `["primary"]` |
 | `key_vault_certificate_subject` | Subject DN. Defaults to `CN=DG-<app_name>`. | `string` | `null` |
 | `key_vault_certificate_validity_months` | Validity period in months (1–120). | `number` | `12` |
 | `key_vault_certificate_key_size` | RSA key size: `2048` or `4096`. | `number` | `2048` |
@@ -338,9 +339,27 @@ Share the password with the vendor out-of-band — not in the same message as th
 |---|---|
 | `key_vault_uri` | URI of the Key Vault. |
 | `key_vault_secret_name` | Name of the client secret in Key Vault. |
-| `key_vault_certificate_name` | Name of the generated certificate in Key Vault. |
-| `key_vault_certificate_thumbprint` | Thumbprint of the generated certificate. |
-| `key_vault_certificate_expiry` | Expiry date of the generated certificate. |
+| `key_vault_certificate_names` | Map of slot name to Key Vault certificate name (e.g. `{ primary = "myapp-cert-primary" }`). |
+| `key_vault_certificate_thumbprints` | Map of slot name to certificate thumbprint. |
+| `key_vault_certificate_expiries` | Map of slot name to certificate expiry date. |
+
+### Certificate rotation
+
+All cert slots are registered in Entra simultaneously, so you can rotate without downtime:
+
+**Step 1 — add the secondary slot:**
+```hcl
+key_vault_certificate_slots = ["primary", "secondary"]
+```
+Apply. Both certs are now valid in Entra. Export `<app_slug>-cert-secondary` from Key Vault, password-protect it, and send it to the vendor.
+
+**Step 2 — wait for the vendor to confirm the new cert works.**
+
+**Step 3 — remove the old slot:**
+```hcl
+key_vault_certificate_slots = ["secondary"]
+```
+Apply. The old cert is removed from Entra and deleted from Key Vault.
 
 ---
 

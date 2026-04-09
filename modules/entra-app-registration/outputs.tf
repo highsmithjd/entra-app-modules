@@ -44,19 +44,19 @@ output "key_vault_secret_name" {
   value       = var.create_key_vault && var.client_secret_enabled ? azurerm_key_vault_secret.client_secret[0].name : null
 }
 
-output "key_vault_certificate_name" {
-  description = "Name of the certificate in Key Vault. Null if not created by the module."
-  value       = local.create_kv_cert ? azurerm_key_vault_certificate.this[0].name : null
+output "key_vault_certificate_names" {
+  description = "Map of slot name to Key Vault certificate name (e.g. { primary = 'myapp-cert-primary' }). Empty if not created by the module."
+  value       = { for slot, cert in azurerm_key_vault_certificate.this : slot => cert.name }
 }
 
-output "key_vault_certificate_thumbprint" {
-  description = "Thumbprint of the generated certificate. Null if not created by the module."
-  value       = local.create_kv_cert ? azurerm_key_vault_certificate.this[0].thumbprint : null
+output "key_vault_certificate_thumbprints" {
+  description = "Map of slot name to certificate thumbprint. Empty if not created by the module."
+  value       = { for slot, cert in azurerm_key_vault_certificate.this : slot => cert.thumbprint }
 }
 
-output "key_vault_certificate_expiry" {
-  description = "Expiry date of the generated certificate. Null if not created by the module."
-  value       = local.create_kv_cert ? azurerm_key_vault_certificate.this[0].certificate_attribute[0].expires : null
+output "key_vault_certificate_expiries" {
+  description = "Map of slot name to certificate expiry date. Empty if not created by the module."
+  value       = { for slot, cert in azurerm_key_vault_certificate.this : slot => cert.certificate_attribute[0].expires }
 }
 
 output "federated_credential_ids" {
