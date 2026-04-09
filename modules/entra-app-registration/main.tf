@@ -217,7 +217,6 @@ resource "azuread_application_certificate" "this" {
   count = var.client_certificate_enabled || local.create_kv_cert ? 1 : 0
 
   application_id = azuread_application.this.id
-  display_name   = var.client_certificate_display_name
   type           = "AsymmetricX509Cert"
   value          = local.create_kv_cert ? azurerm_key_vault_certificate.this[0].certificate_data_base64 : var.client_certificate_value
   end_date       = local.create_kv_cert ? azurerm_key_vault_certificate.this[0].certificate_attribute[0].expires : var.client_certificate_expiry
