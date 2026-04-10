@@ -296,18 +296,17 @@ module "app" {
 To export the PFX after apply (e.g. to send to a vendor):
 
 ```bash
+# Download from Key Vault (produces a binary PKCS#12)
 az keyvault secret download \
   --vault-name kv-dg-myapp \
   --name myapp-cert \
   --file myapp.pfx \
   --encoding base64
-```
 
-Key Vault generates the PFX with an empty password. **Always password-protect it before sending to a vendor.** Re-encrypt with a password after downloading:
-
-```bash
-openssl pkcs12 -in myapp.pfx -out myapp-protected.pfx \
-  --export -passout pass:YourPasswordHere
+# Re-encrypt with a password before sending to the vendor
+openssl pkcs12 -in myapp.pfx -out temp.pem -passin pass: -nodes
+openssl pkcs12 -export -in temp.pem -out myapp-protected.pfx -passout pass:YourPasswordHere
+rm temp.pem
 ```
 
 Share the password with the vendor out-of-band — not in the same message as the file.
