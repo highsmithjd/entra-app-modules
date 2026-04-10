@@ -13,7 +13,8 @@ All apps are automatically prefixed with `DG-`. Both modules support an optional
 
 | Tool | Version |
 |---|---|
-| Terraform | >= 1.3.0 |
+| OpenTofu (preferred) | >= 1.3.0 |
+| Terraform (compatible) | >= 1.3.0 |
 | hashicorp/azuread provider | >= 2.47.0 |
 | hashicorp/time provider | >= 0.9.0 |
 
