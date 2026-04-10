@@ -231,6 +231,26 @@ module "github_actions_app" {
 
 Both modules support an optional Azure Key Vault per app. When enabled, the module creates the vault and grants the Terraform service principal the necessary roles automatically.
 
+### Prerequisites
+
+Before enabling Key Vault features, the following must be in place:
+
+**Azure subscription**
+An active Azure subscription is required. Key Vaults and resource groups are Azure resources — they are separate from Entra ID and incur Azure costs.
+
+**Pipeline service principal permissions**
+The identity running Terraform (e.g. a CI/CD service principal) needs the following at the subscription or resource group scope:
+
+| What | Why |
+|---|---|
+| `Contributor` on the subscription or resource group | Create and manage resource groups and Key Vaults |
+| `User Access Administrator` on the subscription or resource group | Assign RBAC roles to the vault (the module does this automatically for secrets and certificates) |
+
+Or use the built-in **`Owner`** role which covers both. Without `User Access Administrator`, the module will fail when it tries to assign itself `Key Vault Secrets Officer` or `Key Vault Certificates Officer`.
+
+**Entra roles**
+These are unchanged from the base module requirements — `Application Administrator` or `Cloud Application Administrator`.
+
 ### Basic usage
 
 ```hcl
