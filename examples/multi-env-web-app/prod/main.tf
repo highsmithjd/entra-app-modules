@@ -15,8 +15,6 @@ terraform {
       version = ">= 0.9.0"
     }
   }
-
-
 }
 
 provider "azuread" {}
@@ -25,8 +23,11 @@ provider "azurerm" {
   features {}
 }
 
+# Prod environment — fully self-contained.
+# Lives in its own repo (e.g. dg-entra-apps-prod/dg-mywebapp).
+# Creates its own resource group and Key Vault independently of sbx.
 module "app" {
-  source = "../../../modules/entra-app-registration"
+  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-app-registration?ref=v2.0.0"
 
   app_name  = "MyWebApp-Prod"
   flow_type = "web"
@@ -34,11 +35,8 @@ module "app" {
   redirect_uris = ["https://mywebapp.example.com/auth/callback"]
   logout_url    = "https://mywebapp.example.com/logout"
 
-  client_secret_enabled     = true
-  client_secret_expiry_days = 365
-
-  create_key_vault              = true
-  key_vault_resource_group_name = "rg-dg-mywebapp" # managed by shared/
+  create_key_vault             = true
+  create_key_vault_certificate = true
 
   required_resource_access = [
     {
@@ -52,7 +50,7 @@ module "app" {
   ]
 
   notes = "Owner: platform-team | Env: prod"
-  tags  = ["platform-team", "prod"]
+  tags  = ["platform-team", "web", "prod"]
 }
 
 output "application_id" {
@@ -63,10 +61,10 @@ output "key_vault_uri" {
   value = module.app.key_vault_uri
 }
 
-output "key_vault_secret_name" {
-  value = module.app.key_vault_secret_name
+output "key_vault_certificate_names" {
+  value = module.app.key_vault_certificate_names
 }
 
-output "client_secret_expiry" {
-  value = module.app.client_secret_expiry
+output "key_vault_certificate_expiries" {
+  value = module.app.key_vault_certificate_expiries
 }

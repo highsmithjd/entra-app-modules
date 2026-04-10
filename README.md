@@ -256,7 +256,7 @@ These are unchanged from the base module requirements — `Application Administr
 
 ```hcl
 module "app" {
-  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-app-registration?ref=v1.4.0"
+  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-app-registration?ref=v2.0.0"
 
   app_name = "MyApp"
 
@@ -265,31 +265,20 @@ module "app" {
 }
 ```
 
-### Shared resource group
+### Resource group per environment
 
-Always manage the Azure resource group in a separate `shared/` Terraform root with its own state — even if you only have one environment today. This is the standard pattern across all apps.
+Each environment is fully self-contained — the module creates its own resource group and Key Vault. When `key_vault_resource_group_name` is not set (the default), the module auto-creates a resource group named `rg-dg-<app_slug>`.
 
-When `key_vault_resource_group_name` is not set, the module creates a resource group named `rg-dg-<app_slug>` alongside the vault. If the resource group is owned by `sbx`, destroying `sbx` would delete it — taking any future `prod` Key Vault with it. Owning the resource group in `shared/` means no single environment can destroy it accidentally.
+The recommended deployment model is **one repo per environment**, with each repo managing a single environment independently:
 
-```hcl
-# shared/main.tf — owns the resource group, applied first
-resource "azurerm_resource_group" "shared" {
-  name     = "rg-dg-myapp"
-  location = "centralus"
-}
-
-# sbx/main.tf and prod/main.tf — reference it by name
-module "app" {
-  source = "..."
-
-  create_key_vault              = true
-  key_vault_resource_group_name = "rg-dg-myapp"  # module uses this, doesn't create it
-}
+```
+dg-myapp-nonprod/   → sbx environment → rg-dg-myapp-sbx + kv-dg-myapp-sbx
+dg-myapp-prod/      → prod environment → rg-dg-myapp-prod + kv-dg-myapp-prod
 ```
 
-Apply order: `shared` first, then `sbx` and `prod` in any order.
+This gives full isolation — destroying sbx cannot affect prod, and RBAC on the repo controls who can deploy to each environment. There is no shared state between environments.
 
-Deprovisioning order when retiring an app: `destroy prod → destroy sbx → destroy shared`.
+If you need to override the resource group (e.g. to use a pre-existing one), set `key_vault_resource_group_name` explicitly.
 
 ### Client secret storage
 
@@ -301,7 +290,7 @@ When `create_key_vault_certificate = true`, the module generates a self-signed R
 
 ```hcl
 module "app" {
-  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-app-registration?ref=v1.4.0"
+  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-app-registration?ref=v2.0.0"
 
   app_name = "MyApp"
 
@@ -468,8 +457,8 @@ Client secret values are stored in Terraform state. Ensure your state backend is
 
 ## Examples
 
-Full working examples are in the [`examples/`](examples/) directory. All examples follow the standard directory structure with a `shared/` root that owns the Azure resource group, and per-environment roots (`sbx/`, `prod/`) that own the app registration and Key Vault.
+Full working examples are in the [`examples/`](examples/) directory. Each example is a single self-contained environment — one `main.tf` and one `backend.tf`. Deploy one copy per environment, each in its own repo.
 
-- [`examples/enterprise-app-saml/`](examples/enterprise-app-saml/) — SAML Enterprise App with group assignments (`shared/` + `sbx/`)
-- [`examples/app-registration-oidc/`](examples/app-registration-oidc/) — OIDC web app with client secret and Key Vault (`shared/` + `sbx/`)
-- [`examples/multi-env-web-app/`](examples/multi-env-web-app/) — Web app across sbx and prod with independent Terraform state per environment (`shared/` + `sbx/` + `prod/`)
+- [`examples/enterprise-app-saml/`](examples/enterprise-app-saml/) — SAML Enterprise App with group assignments
+- [`examples/app-registration-oidc/`](examples/app-registration-oidc/) — OIDC web app with Key Vault-managed certificate
+- [`examples/multi-env-web-app/`](examples/multi-env-web-app/) — Web app showing sbx and prod as independent self-contained deployments

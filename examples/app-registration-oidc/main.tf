@@ -23,8 +23,11 @@ provider "azurerm" {
   features {}
 }
 
+# Self-contained OIDC web app deployment.
+# Deploy one copy per environment, each in its own repo with its own state.
+# Each deployment creates its own resource group and Key Vault independently.
 module "app" {
-  source = "../../../modules/entra-app-registration"
+  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-app-registration?ref=v2.0.0"
 
   app_name  = "MyWebApp-Sbx"
   flow_type = "web"
@@ -32,11 +35,9 @@ module "app" {
   redirect_uris = ["https://sbx.mywebapp.example.com/auth/callback"]
   logout_url    = "https://sbx.mywebapp.example.com/logout"
 
-  client_secret_enabled     = true
-  client_secret_expiry_days = 365
+  create_key_vault             = true
+  create_key_vault_certificate = true
 
-  create_key_vault                     = true
-  key_vault_resource_group_name        = "rg-dg-mywebapp" # managed by shared/
   key_vault_soft_delete_retention_days = 7
   key_vault_purge_protection_enabled   = false
 
@@ -44,7 +45,9 @@ module "app" {
     {
       resource_app_id = "00000003-0000-0000-c000-000000000000" # Microsoft Graph
       resource_access = [
-        { id = "e1fe6dd8-ba31-4d61-89e7-88639da4683d", type = "Scope" }, # User.Read (delegated)
+        { id = "37f7f235-527c-4136-accd-4a02d197296e", type = "Scope" }, # openid
+        { id = "14dad69e-099b-42c9-810b-d002981feec1", type = "Scope" }, # profile
+        { id = "64a6cdd6-aab1-4aad-94b8-3cc8405e90d6", type = "Scope" }, # email
       ]
     }
   ]
@@ -57,14 +60,14 @@ output "application_id" {
   value = module.app.application_id
 }
 
-output "client_secret_expiry" {
-  value = module.app.client_secret_expiry
-}
-
 output "key_vault_uri" {
   value = module.app.key_vault_uri
 }
 
-output "key_vault_secret_name" {
-  value = module.app.key_vault_secret_name
+output "key_vault_certificate_names" {
+  value = module.app.key_vault_certificate_names
+}
+
+output "key_vault_certificate_expiries" {
+  value = module.app.key_vault_certificate_expiries
 }

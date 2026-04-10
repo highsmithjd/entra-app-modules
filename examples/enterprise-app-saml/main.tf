@@ -11,8 +11,10 @@ terraform {
 
 provider "azuread" {}
 
+# Self-contained SAML enterprise app deployment.
+# Deploy one copy per environment, each in its own repo with its own state.
 module "app" {
-  source = "../../../modules/entra-enterprise-app"
+  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-enterprise-app?ref=v2.0.0"
 
   app_name = "MyVendorApp-Sbx"
 
