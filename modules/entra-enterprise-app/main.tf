@@ -139,7 +139,7 @@ resource "azurerm_resource_group" "this" {
 resource "azurerm_key_vault" "this" {
   count               = var.create_key_vault ? 1 : 0
   name                = local.vault_name
-  resource_group_name = local.rg_name
+  resource_group_name = local.create_rg ? azurerm_resource_group.this[0].name : local.rg_name
   location            = var.key_vault_location
   tenant_id           = data.azurerm_client_config.current.tenant_id
   sku_name            = "standard"
@@ -153,8 +153,6 @@ resource "azurerm_key_vault" "this" {
     managed-by = "terraform"
     app        = local.full_name
   }
-
-  depends_on = [azurerm_resource_group.this]
 }
 
 resource "azurerm_role_assignment" "terraform_secrets_officer" {
