@@ -2,8 +2,10 @@ locals {
   full_name         = "DG-${var.app_name}"
   cert_display_name = coalesce(var.saml_certificate_display_name, "CN=${local.full_name}")
   secret_end_date   = timeadd(time_static.now.rfc3339, "${var.client_secret_expiry_days * 24}h")
-  app_slug   = lower(replace(var.app_name, " ", "-"))
-  vault_name = "kv-dg-${local.app_slug}"
+  # Key Vault naming — lowercase, hyphens only, max 24 chars total
+  # Budget: "kv-" (3) + slug (≤16) + "-" (1) + 4-char hex suffix = max 24
+  app_slug   = substr(lower(replace(var.app_name, " ", "-")), 0, 16)
+  vault_name = var.create_key_vault ? "kv-${local.app_slug}-${random_id.kv_suffix[0].hex}" : null
 
   # Use the provided resource group name or auto-generate one
   rg_name   = coalesce(var.key_vault_resource_group_name, "rg-dg-${local.app_slug}")
@@ -124,6 +126,11 @@ resource "azuread_application_password" "this" {
 # ---------------------------------------------------------------------------
 
 data "azurerm_client_config" "current" {}
+
+resource "random_id" "kv_suffix" {
+  count       = var.create_key_vault ? 1 : 0
+  byte_length = 2 # produces a 4-char hex string
+}
 
 resource "azurerm_resource_group" "this" {
   count    = local.create_rg ? 1 : 0
