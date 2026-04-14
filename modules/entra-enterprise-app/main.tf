@@ -153,6 +153,8 @@ resource "azurerm_key_vault" "this" {
     managed-by = "terraform"
     app        = local.full_name
   }
+
+  depends_on = [azurerm_resource_group.this]
 }
 
 resource "azurerm_role_assignment" "terraform_secrets_officer" {

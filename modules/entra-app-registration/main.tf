@@ -177,6 +177,8 @@ resource "azurerm_key_vault" "this" {
     managed-by = "terraform"
     app        = local.full_name
   }
+
+  depends_on = [azurerm_resource_group.this]
 }
 
 # Terraform SP always gets Secrets Officer so it can write secrets
