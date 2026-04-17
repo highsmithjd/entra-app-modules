@@ -23,7 +23,6 @@ data "azuread_client_config" "current" {}
 
 resource "azuread_application" "this" {
   display_name     = local.full_name
-  identifier_uris  = var.saml_identifier_uris
   sign_in_audience = "AzureADMyOrg"
   notes            = var.notes
 
@@ -56,6 +55,25 @@ resource "azuread_application" "this" {
     # Prevent accidental rename which would break SSO
     ignore_changes = [display_name]
   }
+}
+
+# Patch identifier URIs after creation via a direct Graph API call.
+# The Graph API rejects vendor-supplied entity IDs (e.g. urn:vendor:app or
+# https://app.vendor.com) at creation time because they don't match a
+# verified domain. A subsequent PATCH bypasses this — matching what the
+# portal does internally.
+resource "azapi_resource_action" "app_identifier_uris" {
+  count = length(var.saml_identifier_uris) > 0 ? 1 : 0
+
+  type        = "Microsoft.Graph/applications@v1.0"
+  resource_id = "/applications/${azuread_application.this.object_id}"
+  method      = "PATCH"
+
+  body = {
+    identifierUris = var.saml_identifier_uris
+  }
+
+  response_export_values = []
 }
 
 # ---------------------------------------------------------------------------
