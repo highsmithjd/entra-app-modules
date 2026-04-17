@@ -184,6 +184,12 @@ variable "feature_tags" {
 # Metadata / Documentation
 # ---------------------------------------------------------------------------
 
+variable "notification_email_addresses" {
+  description = "List of email addresses to notify when the SAML signing certificate is near expiry."
+  type        = list(string)
+  default     = []
+}
+
 variable "notes" {
   description = "Free-text notes stored on the application object. Useful for owner, team, ticket references, etc."
   type        = string
