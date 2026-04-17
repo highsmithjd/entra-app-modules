@@ -64,7 +64,7 @@ resource "azapi_update_resource" "app_identifier_uris" {
   count = length(var.saml_identifier_uris) > 0 ? 1 : 0
 
   type        = "Microsoft.Graph/applications@v1.0"
-  resource_id = azuread_application.this.id
+  resource_id = azuread_application.this.object_id
 
   body = {
     identifierUris = var.saml_identifier_uris
