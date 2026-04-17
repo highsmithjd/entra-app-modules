@@ -63,8 +63,9 @@ resource "azuread_application" "this" {
 # verified domain. A subsequent PATCH bypasses this — matching what the
 # portal does internally.
 #
-# Two resources: one for Linux/macOS runners (default), one for Windows runners.
-# Set use_powershell_provisioner = true in the module call for Windows.
+# The destroy provisioner clears identifierUris before the service principal
+# is deleted — Entra blocks SP deletion when non-verified URIs are present.
+# depends_on includes the SP so this resource is destroyed first (reverse order).
 
 resource "null_resource" "app_identifier_uris" {
   count = length(var.saml_identifier_uris) > 0 ? 1 : 0
@@ -92,7 +93,26 @@ resource "null_resource" "app_identifier_uris" {
     EOT
   }
 
-  depends_on = [azuread_application.this]
+  provisioner "local-exec" {
+    when = destroy
+    command = <<-EOT
+      set -e
+      if ! az account show > /dev/null 2>&1; then
+        az login --service-principal \
+          --federated-token "$ARM_OIDC_TOKEN" \
+          --username "$ARM_CLIENT_ID" \
+          --tenant "$ARM_TENANT_ID" \
+          --allow-no-subscriptions > /dev/null
+      fi
+      az rest --method PATCH \
+        --url "https://graph.microsoft.com/v1.0/applications/${self.triggers.object_id}" \
+        --body '{"identifierUris": []}'
+    EOT
+  }
+
+  # SP is included so this resource is destroyed before the SP (reverse dep order),
+  # giving the destroy provisioner a chance to clear identifierUris first.
+  depends_on = [azuread_application.this, azuread_service_principal.this]
 }
 
 # ---------------------------------------------------------------------------
