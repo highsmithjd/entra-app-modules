@@ -62,18 +62,74 @@ resource "azuread_application" "this" {
 # https://app.vendor.com) at creation time because they don't match a
 # verified domain. A subsequent PATCH bypasses this — matching what the
 # portal does internally.
-resource "azapi_resource_action" "app_identifier_uris" {
+#
+# Auth: exchanges the pipeline's OIDC token (ARM_OIDC_TOKEN) for a Graph
+# access token using the client credentials + federated assertion flow.
+resource "null_resource" "app_identifier_uris" {
   count = length(var.saml_identifier_uris) > 0 ? 1 : 0
 
-  type        = "Microsoft.Graph/applications@v1.0"
-  resource_id = "/applications/${azuread_application.this.object_id}"
-  method      = "PATCH"
-
-  body = {
-    identifierUris = var.saml_identifier_uris
+  triggers = {
+    object_id      = azuread_application.this.object_id
+    identifier_uris = jsonencode(var.saml_identifier_uris)
   }
 
-  response_export_values = []
+  provisioner "local-exec" {
+    interpreter = ["/bin/sh", "-c"]
+    command     = <<-EOT
+      set -e
+
+      # Build the JSON body for identifierUris
+      BODY='{"identifierUris":${jsonencode(var.saml_identifier_uris)}}'
+
+      # Try OIDC federated credential grant first (CI/CD pipelines with use_oidc = true).
+      # ARM_OIDC_TOKEN is the raw OIDC JWT provided by the IdP (GitLab, GitHub, etc.).
+      if [ -n "$ARM_OIDC_TOKEN" ]; then
+        TOKEN_RESPONSE=$(curl -s -X POST \
+          "https://login.microsoftonline.com/$ARM_TENANT_ID/oauth2/v2.0/token" \
+          -H "Content-Type: application/x-www-form-urlencoded" \
+          --data-urlencode "client_id=$ARM_CLIENT_ID" \
+          --data-urlencode "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+          --data-urlencode "client_assertion=$ARM_OIDC_TOKEN" \
+          --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
+          --data-urlencode "scope=https://graph.microsoft.com/.default")
+      fi
+
+      # Fall back to client_secret if OIDC token isn't available or failed
+      if [ -z "$ARM_OIDC_TOKEN" ] || echo "$TOKEN_RESPONSE" | grep -q '"error"'; then
+        TOKEN_RESPONSE=$(curl -s -X POST \
+          "https://login.microsoftonline.com/$ARM_TENANT_ID/oauth2/v2.0/token" \
+          -H "Content-Type: application/x-www-form-urlencoded" \
+          --data-urlencode "client_id=$ARM_CLIENT_ID" \
+          --data-urlencode "client_secret=$ARM_CLIENT_SECRET" \
+          --data-urlencode "grant_type=client_credentials" \
+          --data-urlencode "scope=https://graph.microsoft.com/.default")
+      fi
+
+      ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+
+      if [ -z "$ACCESS_TOKEN" ]; then
+        echo "ERROR: failed to obtain Graph access token"
+        echo "$TOKEN_RESPONSE"
+        exit 1
+      fi
+
+      # PATCH the application with the vendor-supplied identifierUris
+      HTTP_STATUS=$(curl -s -o /dev/null -w "%%{http_code}" -X PATCH \
+        "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$BODY")
+
+      if [ "$HTTP_STATUS" != "204" ]; then
+        echo "ERROR: Graph PATCH returned HTTP $HTTP_STATUS"
+        exit 1
+      fi
+
+      echo "identifierUris patched successfully (HTTP 204)"
+    EOT
+  }
+
+  depends_on = [azuread_application.this]
 }
 
 # ---------------------------------------------------------------------------
