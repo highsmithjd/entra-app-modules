@@ -76,16 +76,22 @@ resource "null_resource" "app_identifier_uris_sh" {
 
   provisioner "local-exec" {
     interpreter = ["/bin/sh", "-c"]
-    command     = <<-EOT
+    # Inject tenant/client from Terraform's own auth context so the script
+    # doesn't depend on ARM_* vars being inherited by the subprocess.
+    environment = {
+      TF_TENANT_ID = data.azurerm_client_config.current.tenant_id
+      TF_CLIENT_ID = data.azurerm_client_config.current.client_id
+      TF_OBJECT_ID = azuread_application.this.object_id
+      TF_URI_BODY  = jsonencode({ identifierUris = var.saml_identifier_uris })
+    }
+    command = <<-EOT
       set -e
-
-      BODY='{"identifierUris":${jsonencode(var.saml_identifier_uris)}}'
 
       if [ -n "$ARM_OIDC_TOKEN" ]; then
         TOKEN_RESPONSE=$(curl -s -X POST \
-          "https://login.microsoftonline.com/$ARM_TENANT_ID/oauth2/v2.0/token" \
+          "https://login.microsoftonline.com/$TF_TENANT_ID/oauth2/v2.0/token" \
           -H "Content-Type: application/x-www-form-urlencoded" \
-          --data-urlencode "client_id=$ARM_CLIENT_ID" \
+          --data-urlencode "client_id=$TF_CLIENT_ID" \
           --data-urlencode "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
           --data-urlencode "client_assertion=$ARM_OIDC_TOKEN" \
           --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
@@ -94,9 +100,9 @@ resource "null_resource" "app_identifier_uris_sh" {
 
       if [ -z "$ARM_OIDC_TOKEN" ] || echo "$TOKEN_RESPONSE" | grep -q '"error"'; then
         TOKEN_RESPONSE=$(curl -s -X POST \
-          "https://login.microsoftonline.com/$ARM_TENANT_ID/oauth2/v2.0/token" \
+          "https://login.microsoftonline.com/$TF_TENANT_ID/oauth2/v2.0/token" \
           -H "Content-Type: application/x-www-form-urlencoded" \
-          --data-urlencode "client_id=$ARM_CLIENT_ID" \
+          --data-urlencode "client_id=$TF_CLIENT_ID" \
           --data-urlencode "client_secret=$ARM_CLIENT_SECRET" \
           --data-urlencode "grant_type=client_credentials" \
           --data-urlencode "scope=https://graph.microsoft.com/.default")
@@ -111,10 +117,10 @@ resource "null_resource" "app_identifier_uris_sh" {
       fi
 
       HTTP_STATUS=$(curl -s -o /dev/null -w "%%{http_code}" -X PATCH \
-        "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
+        "https://graph.microsoft.com/v1.0/applications/$TF_OBJECT_ID" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Content-Type: application/json" \
-        -d "$BODY")
+        -d "$TF_URI_BODY")
 
       if [ "$HTTP_STATUS" != "204" ]; then
         echo "ERROR: Graph PATCH returned HTTP $HTTP_STATUS"
@@ -138,29 +144,26 @@ resource "null_resource" "app_identifier_uris_ps" {
 
   provisioner "local-exec" {
     interpreter = ["powershell", "-Command"]
-    command     = <<-EOT
+    # Inject tenant/client from Terraform's own auth context so the script
+    # doesn't depend on ARM_* vars being inherited by the subprocess.
+    environment = {
+      TF_TENANT_ID = data.azurerm_client_config.current.tenant_id
+      TF_CLIENT_ID = data.azurerm_client_config.current.client_id
+      TF_OBJECT_ID = azuread_application.this.object_id
+      TF_URI_BODY  = jsonencode({ identifierUris = var.saml_identifier_uris })
+    }
+    command = <<-EOT
       $ErrorActionPreference = 'Stop'
-      $body = '{"identifierUris":${jsonencode(var.saml_identifier_uris)}}'
-
-      # Diagnose environment — helps identify missing CI variables
-      $tenantId    = $env:ARM_TENANT_ID
-      $clientId    = $env:ARM_CLIENT_ID
-      $oidcToken   = $env:ARM_OIDC_TOKEN
+      $tenantId     = $env:TF_TENANT_ID
+      $clientId     = $env:TF_CLIENT_ID
+      $objectId     = $env:TF_OBJECT_ID
+      $body         = $env:TF_URI_BODY
+      $oidcToken    = $env:ARM_OIDC_TOKEN
       $clientSecret = $env:ARM_CLIENT_SECRET
-
-      Write-Host "DEBUG: ARM_TENANT_ID   = '$tenantId'"
-      Write-Host "DEBUG: ARM_CLIENT_ID   = '$clientId'"
-      Write-Host "DEBUG: ARM_OIDC_TOKEN  set = $([bool]$oidcToken)"
-      Write-Host "DEBUG: ARM_CLIENT_SECRET set = $([bool]$clientSecret)"
-
-      if (-not $tenantId) { throw "ARM_TENANT_ID is not set" }
-      if (-not $clientId)  { throw "ARM_CLIENT_ID is not set" }
-
-      $tokenUri = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token"
-      $tok = $null
+      $tokenUri     = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token"
+      $tok          = $null
 
       if ($oidcToken) {
-        Write-Host "DEBUG: attempting OIDC federated credential grant..."
         try {
           $tok = Invoke-RestMethod -Method Post -Uri $tokenUri `
             -ContentType 'application/x-www-form-urlencoded' `
@@ -169,36 +172,24 @@ resource "null_resource" "app_identifier_uris_ps" {
                    "&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" +
                    "&client_assertion=" + [Uri]::EscapeDataString($oidcToken) +
                    "&scope=https://graph.microsoft.com/.default")
-          Write-Host "DEBUG: OIDC grant succeeded"
-        } catch {
-          Write-Host "DEBUG: OIDC grant failed: $_"
-          $tok = $null
-        }
+        } catch { $tok = $null }
       }
 
       if (-not $tok) {
-        if (-not $clientSecret) { throw "ARM_CLIENT_SECRET is not set and OIDC grant failed or was not attempted" }
-        Write-Host "DEBUG: attempting client_credentials grant..."
-        try {
-          $tok = Invoke-RestMethod -Method Post -Uri $tokenUri `
-            -ContentType 'application/x-www-form-urlencoded' `
-            -Body ("client_id=" + [Uri]::EscapeDataString($clientId) +
-                   "&client_secret=" + [Uri]::EscapeDataString($clientSecret) +
-                   "&grant_type=client_credentials" +
-                   "&scope=https://graph.microsoft.com/.default")
-          Write-Host "DEBUG: client_credentials grant succeeded"
-        } catch {
-          throw "client_credentials grant failed: $_"
-        }
+        $tok = Invoke-RestMethod -Method Post -Uri $tokenUri `
+          -ContentType 'application/x-www-form-urlencoded' `
+          -Body ("client_id=" + [Uri]::EscapeDataString($clientId) +
+                 "&client_secret=" + [Uri]::EscapeDataString($clientSecret) +
+                 "&grant_type=client_credentials" +
+                 "&scope=https://graph.microsoft.com/.default")
       }
 
       $headers = @{
         'Authorization' = "Bearer $($tok.access_token)"
         'Content-Type'  = 'application/json'
       }
-      Write-Host "DEBUG: PATCHing application ${azuread_application.this.object_id}..."
       $resp = Invoke-WebRequest -Method Patch -UseBasicParsing `
-        -Uri "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" `
+        -Uri "https://graph.microsoft.com/v1.0/applications/$objectId" `
         -Headers $headers -Body $body
 
       if ($resp.StatusCode -ne 204) {
