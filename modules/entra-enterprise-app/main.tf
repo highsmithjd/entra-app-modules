@@ -36,6 +36,7 @@ resource "azuread_application" "this" {
   # SAML configuration lives under the web block
   web {
     redirect_uris = var.saml_reply_urls
+    logout_url    = var.saml_logout_url
 
     implicit_grant {
       access_token_issuance_enabled = false
@@ -78,24 +79,6 @@ resource "azuread_service_principal" "this" {
     [data.azuread_client_config.current.object_id],
     var.owners
   ))
-}
-
-# ---------------------------------------------------------------------------
-# SAML logout URL (set via service principal, not application)
-# ---------------------------------------------------------------------------
-
-resource "azuread_service_principal_claims_mapping_policy_assignment" "logout" {
-  count = var.saml_logout_url != null ? 1 : 0
-
-  # The logout URL is set via the SLO URL on the SAML config; this is a placeholder
-  # for where you'd attach a claims mapping policy if needed.
-  # Use azuread_service_principal directly for slo_url when provider supports it.
-  claims_mapping_policy_id = ""
-  service_principal_id     = azuread_service_principal.this.id
-
-  lifecycle {
-    ignore_changes = [claims_mapping_policy_id]
-  }
 }
 
 # ---------------------------------------------------------------------------
