@@ -23,7 +23,6 @@ data "azuread_client_config" "current" {}
 
 resource "azuread_application" "this" {
   display_name     = local.full_name
-  identifier_uris  = var.saml_identifier_uris
   sign_in_audience = "AzureADMyOrg"
   notes            = var.notes
 
@@ -55,6 +54,20 @@ resource "azuread_application" "this" {
   lifecycle {
     # Prevent accidental rename which would break SSO
     ignore_changes = [display_name]
+  }
+}
+
+# Patch identifier URIs (entity IDs) onto the app after creation.
+# The Graph API rejects unverified domains when set at creation time but
+# accepts them via a subsequent PATCH — matching what the portal does.
+resource "azapi_update_resource" "app_identifier_uris" {
+  count = length(var.saml_identifier_uris) > 0 ? 1 : 0
+
+  type        = "Microsoft.Graph/applications@v1.0"
+  resource_id = azuread_application.this.id
+
+  body = {
+    identifierUris = var.saml_identifier_uris
   }
 }
 
