@@ -63,26 +63,24 @@ resource "azuread_application" "this" {
 # verified domain. A subsequent PATCH bypasses this — matching what the
 # portal does internally.
 #
-# Auth: exchanges the pipeline's OIDC token (ARM_OIDC_TOKEN) for a Graph
-# access token using the client credentials + federated assertion flow.
-resource "null_resource" "app_identifier_uris" {
-  count = length(var.saml_identifier_uris) > 0 ? 1 : 0
+# Two resources: one for Linux/macOS runners (default), one for Windows runners.
+# Set use_powershell_provisioner = true in the module call for Windows.
+
+resource "null_resource" "app_identifier_uris_sh" {
+  count = length(var.saml_identifier_uris) > 0 && !var.use_powershell_provisioner ? 1 : 0
 
   triggers = {
-    object_id      = azuread_application.this.object_id
+    object_id       = azuread_application.this.object_id
     identifier_uris = jsonencode(var.saml_identifier_uris)
   }
 
-  # Linux/macOS runners (default)
   provisioner "local-exec" {
-    count       = var.use_powershell_provisioner ? 0 : 1
     interpreter = ["/bin/sh", "-c"]
     command     = <<-EOT
       set -e
 
       BODY='{"identifierUris":${jsonencode(var.saml_identifier_uris)}}'
 
-      # Try OIDC federated credential grant first (GitLab, GitHub Actions, etc.)
       if [ -n "$ARM_OIDC_TOKEN" ]; then
         TOKEN_RESPONSE=$(curl -s -X POST \
           "https://login.microsoftonline.com/$ARM_TENANT_ID/oauth2/v2.0/token" \
@@ -94,7 +92,6 @@ resource "null_resource" "app_identifier_uris" {
           --data-urlencode "scope=https://graph.microsoft.com/.default")
       fi
 
-      # Fall back to client_secret if OIDC token isn't available or failed
       if [ -z "$ARM_OIDC_TOKEN" ] || echo "$TOKEN_RESPONSE" | grep -q '"error"'; then
         TOKEN_RESPONSE=$(curl -s -X POST \
           "https://login.microsoftonline.com/$ARM_TENANT_ID/oauth2/v2.0/token" \
@@ -128,9 +125,18 @@ resource "null_resource" "app_identifier_uris" {
     EOT
   }
 
-  # Windows runners — set use_powershell_provisioner = true in the module call
+  depends_on = [azuread_application.this]
+}
+
+resource "null_resource" "app_identifier_uris_ps" {
+  count = length(var.saml_identifier_uris) > 0 && var.use_powershell_provisioner ? 1 : 0
+
+  triggers = {
+    object_id       = azuread_application.this.object_id
+    identifier_uris = jsonencode(var.saml_identifier_uris)
+  }
+
   provisioner "local-exec" {
-    count       = var.use_powershell_provisioner ? 1 : 0
     interpreter = ["powershell", "-Command"]
     command     = <<-EOT
       $ErrorActionPreference = 'Stop'
@@ -166,7 +172,7 @@ resource "null_resource" "app_identifier_uris" {
         'Content-Type'  = 'application/json'
       }
       $resp = Invoke-WebRequest -Method Patch -UseBasicParsing `
-        -Uri 'https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}' `
+        -Uri "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" `
         -Headers $headers -Body $body
 
       if ($resp.StatusCode -ne 204) {
