@@ -119,7 +119,8 @@ resource "azuread_application" "this" {
 resource "azuread_service_principal" "this" {
   count = var.create_service_principal ? 1 : 0
 
-  client_id = azuread_application.this.client_id
+  client_id                    = azuread_application.this.client_id
+  notification_email_addresses = var.notification_email_addresses
 
   feature_tags {
     enterprise = var.feature_tags.enterprise
