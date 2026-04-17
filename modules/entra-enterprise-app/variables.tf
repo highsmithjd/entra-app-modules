@@ -202,30 +202,4 @@ variable "owners" {
   default     = []
 }
 
-# ---------------------------------------------------------------------------
-# Runner / provisioner
-# ---------------------------------------------------------------------------
-
-variable "use_powershell_provisioner" {
-  description = <<-EOT
-    Set to true when running on a Windows CI runner where /bin/sh is not available.
-    Uses PowerShell (Invoke-RestMethod) instead of curl/sh for the identifierUris PATCH.
-    Defaults to false (Linux/macOS runners).
-  EOT
-  type        = bool
-  default     = false
-}
-
-variable "graph_client_secret" {
-  description = <<-EOT
-    Client secret for the service principal running Terraform. Required when
-    saml_identifier_uris is set and OIDC auth is not being used. This is needed
-    because the identifierUris PATCH runs as a local-exec subprocess that cannot
-    read secrets from the provider block — only from environment variables.
-    Mark this as sensitive in your root module.
-  EOT
-  type      = string
-  default   = null
-  sensitive = true
-}
 
