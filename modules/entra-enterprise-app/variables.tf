@@ -202,3 +202,17 @@ variable "owners" {
   default     = []
 }
 
+# ---------------------------------------------------------------------------
+# Runner / provisioner
+# ---------------------------------------------------------------------------
+
+variable "use_powershell_provisioner" {
+  description = <<-EOT
+    Set to true when running on a Windows CI runner where /bin/sh is not available.
+    Uses PowerShell (Invoke-RestMethod) instead of curl/sh for the identifierUris PATCH.
+    Defaults to false (Linux/macOS runners).
+  EOT
+  type        = bool
+  default     = false
+}
+

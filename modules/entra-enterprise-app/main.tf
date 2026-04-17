@@ -73,16 +73,16 @@ resource "null_resource" "app_identifier_uris" {
     identifier_uris = jsonencode(var.saml_identifier_uris)
   }
 
+  # Linux/macOS runners (default)
   provisioner "local-exec" {
+    count       = var.use_powershell_provisioner ? 0 : 1
     interpreter = ["/bin/sh", "-c"]
     command     = <<-EOT
       set -e
 
-      # Build the JSON body for identifierUris
       BODY='{"identifierUris":${jsonencode(var.saml_identifier_uris)}}'
 
-      # Try OIDC federated credential grant first (CI/CD pipelines with use_oidc = true).
-      # ARM_OIDC_TOKEN is the raw OIDC JWT provided by the IdP (GitLab, GitHub, etc.).
+      # Try OIDC federated credential grant first (GitLab, GitHub Actions, etc.)
       if [ -n "$ARM_OIDC_TOKEN" ]; then
         TOKEN_RESPONSE=$(curl -s -X POST \
           "https://login.microsoftonline.com/$ARM_TENANT_ID/oauth2/v2.0/token" \
@@ -113,7 +113,6 @@ resource "null_resource" "app_identifier_uris" {
         exit 1
       fi
 
-      # PATCH the application with the vendor-supplied identifierUris
       HTTP_STATUS=$(curl -s -o /dev/null -w "%%{http_code}" -X PATCH \
         "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
@@ -126,6 +125,55 @@ resource "null_resource" "app_identifier_uris" {
       fi
 
       echo "identifierUris patched successfully (HTTP 204)"
+    EOT
+  }
+
+  # Windows runners — set use_powershell_provisioner = true in the module call
+  provisioner "local-exec" {
+    count       = var.use_powershell_provisioner ? 1 : 0
+    interpreter = ["powershell", "-Command"]
+    command     = <<-EOT
+      $ErrorActionPreference = 'Stop'
+      $body = '{"identifierUris":${jsonencode(var.saml_identifier_uris)}}'
+      $tenantId = $env:ARM_TENANT_ID
+      $clientId = $env:ARM_CLIENT_ID
+      $tokenUri = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token"
+      $tok = $null
+
+      if ($env:ARM_OIDC_TOKEN) {
+        try {
+          $tok = Invoke-RestMethod -Method Post -Uri $tokenUri `
+            -ContentType 'application/x-www-form-urlencoded' `
+            -Body ("client_id=" + [Uri]::EscapeDataString($clientId) +
+                   "&grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" +
+                   "&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" +
+                   "&client_assertion=" + [Uri]::EscapeDataString($env:ARM_OIDC_TOKEN) +
+                   "&scope=https://graph.microsoft.com/.default")
+        } catch { $tok = $null }
+      }
+
+      if (-not $tok) {
+        $tok = Invoke-RestMethod -Method Post -Uri $tokenUri `
+          -ContentType 'application/x-www-form-urlencoded' `
+          -Body ("client_id=" + [Uri]::EscapeDataString($clientId) +
+                 "&client_secret=" + [Uri]::EscapeDataString($env:ARM_CLIENT_SECRET) +
+                 "&grant_type=client_credentials" +
+                 "&scope=https://graph.microsoft.com/.default")
+      }
+
+      $headers = @{
+        'Authorization' = "Bearer $($tok.access_token)"
+        'Content-Type'  = 'application/json'
+      }
+      $resp = Invoke-WebRequest -Method Patch -UseBasicParsing `
+        -Uri 'https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}' `
+        -Headers $headers -Body $body
+
+      if ($resp.StatusCode -ne 204) {
+        Write-Error "Graph PATCH returned HTTP $($resp.StatusCode)"
+        exit 1
+      }
+      Write-Host 'identifierUris patched successfully (HTTP 204)'
     EOT
   }
 
