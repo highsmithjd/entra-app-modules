@@ -141,43 +141,68 @@ resource "null_resource" "app_identifier_uris_ps" {
     command     = <<-EOT
       $ErrorActionPreference = 'Stop'
       $body = '{"identifierUris":${jsonencode(var.saml_identifier_uris)}}'
-      $tenantId = $env:ARM_TENANT_ID
-      $clientId = $env:ARM_CLIENT_ID
+
+      # Diagnose environment — helps identify missing CI variables
+      $tenantId    = $env:ARM_TENANT_ID
+      $clientId    = $env:ARM_CLIENT_ID
+      $oidcToken   = $env:ARM_OIDC_TOKEN
+      $clientSecret = $env:ARM_CLIENT_SECRET
+
+      Write-Host "DEBUG: ARM_TENANT_ID   = '$tenantId'"
+      Write-Host "DEBUG: ARM_CLIENT_ID   = '$clientId'"
+      Write-Host "DEBUG: ARM_OIDC_TOKEN  set = $([bool]$oidcToken)"
+      Write-Host "DEBUG: ARM_CLIENT_SECRET set = $([bool]$clientSecret)"
+
+      if (-not $tenantId) { throw "ARM_TENANT_ID is not set" }
+      if (-not $clientId)  { throw "ARM_CLIENT_ID is not set" }
+
       $tokenUri = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token"
       $tok = $null
 
-      if ($env:ARM_OIDC_TOKEN) {
+      if ($oidcToken) {
+        Write-Host "DEBUG: attempting OIDC federated credential grant..."
         try {
           $tok = Invoke-RestMethod -Method Post -Uri $tokenUri `
             -ContentType 'application/x-www-form-urlencoded' `
             -Body ("client_id=" + [Uri]::EscapeDataString($clientId) +
                    "&grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" +
                    "&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" +
-                   "&client_assertion=" + [Uri]::EscapeDataString($env:ARM_OIDC_TOKEN) +
+                   "&client_assertion=" + [Uri]::EscapeDataString($oidcToken) +
                    "&scope=https://graph.microsoft.com/.default")
-        } catch { $tok = $null }
+          Write-Host "DEBUG: OIDC grant succeeded"
+        } catch {
+          Write-Host "DEBUG: OIDC grant failed: $_"
+          $tok = $null
+        }
       }
 
       if (-not $tok) {
-        $tok = Invoke-RestMethod -Method Post -Uri $tokenUri `
-          -ContentType 'application/x-www-form-urlencoded' `
-          -Body ("client_id=" + [Uri]::EscapeDataString($clientId) +
-                 "&client_secret=" + [Uri]::EscapeDataString($env:ARM_CLIENT_SECRET) +
-                 "&grant_type=client_credentials" +
-                 "&scope=https://graph.microsoft.com/.default")
+        if (-not $clientSecret) { throw "ARM_CLIENT_SECRET is not set and OIDC grant failed or was not attempted" }
+        Write-Host "DEBUG: attempting client_credentials grant..."
+        try {
+          $tok = Invoke-RestMethod -Method Post -Uri $tokenUri `
+            -ContentType 'application/x-www-form-urlencoded' `
+            -Body ("client_id=" + [Uri]::EscapeDataString($clientId) +
+                   "&client_secret=" + [Uri]::EscapeDataString($clientSecret) +
+                   "&grant_type=client_credentials" +
+                   "&scope=https://graph.microsoft.com/.default")
+          Write-Host "DEBUG: client_credentials grant succeeded"
+        } catch {
+          throw "client_credentials grant failed: $_"
+        }
       }
 
       $headers = @{
         'Authorization' = "Bearer $($tok.access_token)"
         'Content-Type'  = 'application/json'
       }
+      Write-Host "DEBUG: PATCHing application ${azuread_application.this.object_id}..."
       $resp = Invoke-WebRequest -Method Patch -UseBasicParsing `
         -Uri "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" `
         -Headers $headers -Body $body
 
       if ($resp.StatusCode -ne 204) {
-        Write-Error "Graph PATCH returned HTTP $($resp.StatusCode)"
-        exit 1
+        throw "Graph PATCH returned HTTP $($resp.StatusCode): $($resp.Content)"
       }
       Write-Host 'identifierUris patched successfully (HTTP 204)'
     EOT
