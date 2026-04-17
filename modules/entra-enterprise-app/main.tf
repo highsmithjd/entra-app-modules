@@ -63,10 +63,11 @@ resource "azuread_application" "this" {
 # ---------------------------------------------------------------------------
 
 resource "azuread_service_principal" "this" {
-  client_id                    = azuread_application.this.client_id
-  app_role_assignment_required = length(var.app_role_assignments) > 0
+  client_id                     = azuread_application.this.client_id
+  app_role_assignment_required  = length(var.app_role_assignments) > 0
   preferred_single_sign_on_mode = "saml"
-  notification_email_addresses = var.notification_email_addresses
+  notification_email_addresses  = var.notification_email_addresses
+  tags                          = var.tags
 
   feature_tags {
     enterprise            = var.feature_tags.enterprise
