@@ -363,11 +363,6 @@ variable "owners" {
   default     = []
 }
 
-variable "tags" {
-  description = "Flat list of string tags on the service principal (e.g. ['platform-team', 'production']). Not key-value pairs — Entra does not support those."
-  type        = list(string)
-  default     = []
-}
 
 variable "create_service_principal" {
   description = "Whether to create a service principal for this app registration. Set false if you only need the app registration object (e.g. for a pure API definition)."

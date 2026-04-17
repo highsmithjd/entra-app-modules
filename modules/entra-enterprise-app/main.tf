@@ -67,7 +67,6 @@ resource "azuread_service_principal" "this" {
   app_role_assignment_required  = length(var.app_role_assignments) > 0
   preferred_single_sign_on_mode = "saml"
   notification_email_addresses  = var.notification_email_addresses
-  tags                          = var.tags
 
   feature_tags {
     enterprise            = var.feature_tags.enterprise

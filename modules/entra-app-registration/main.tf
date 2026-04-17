@@ -121,7 +121,6 @@ resource "azuread_service_principal" "this" {
 
   client_id                    = azuread_application.this.client_id
   notification_email_addresses = var.notification_email_addresses
-  tags                         = var.tags
 
   feature_tags {
     enterprise = var.feature_tags.enterprise
