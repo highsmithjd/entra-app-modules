@@ -216,3 +216,16 @@ variable "use_powershell_provisioner" {
   default     = false
 }
 
+variable "graph_client_secret" {
+  description = <<-EOT
+    Client secret for the service principal running Terraform. Required when
+    saml_identifier_uris is set and OIDC auth is not being used. This is needed
+    because the identifierUris PATCH runs as a local-exec subprocess that cannot
+    read secrets from the provider block — only from environment variables.
+    Mark this as sensitive in your root module.
+  EOT
+  type      = string
+  default   = null
+  sensitive = true
+}
+

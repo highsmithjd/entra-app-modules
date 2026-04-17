@@ -79,10 +79,11 @@ resource "null_resource" "app_identifier_uris_sh" {
     # Inject tenant/client from Terraform's own auth context so the script
     # doesn't depend on ARM_* vars being inherited by the subprocess.
     environment = {
-      TF_TENANT_ID = data.azurerm_client_config.current.tenant_id
-      TF_CLIENT_ID = data.azurerm_client_config.current.client_id
-      TF_OBJECT_ID = azuread_application.this.object_id
-      TF_URI_BODY  = jsonencode({ identifierUris = var.saml_identifier_uris })
+      TF_TENANT_ID     = data.azurerm_client_config.current.tenant_id
+      TF_CLIENT_ID     = data.azurerm_client_config.current.client_id
+      TF_OBJECT_ID     = azuread_application.this.object_id
+      TF_URI_BODY      = jsonencode({ identifierUris = var.saml_identifier_uris })
+      TF_CLIENT_SECRET = coalesce(var.graph_client_secret, "")
     }
     command = <<-EOT
       set -e
@@ -98,12 +99,13 @@ resource "null_resource" "app_identifier_uris_sh" {
           --data-urlencode "scope=https://graph.microsoft.com/.default")
       fi
 
+      CLIENT_SECRET="${TF_CLIENT_SECRET:-$ARM_CLIENT_SECRET}"
       if [ -z "$ARM_OIDC_TOKEN" ] || echo "$TOKEN_RESPONSE" | grep -q '"error"'; then
         TOKEN_RESPONSE=$(curl -s -X POST \
           "https://login.microsoftonline.com/$TF_TENANT_ID/oauth2/v2.0/token" \
           -H "Content-Type: application/x-www-form-urlencoded" \
           --data-urlencode "client_id=$TF_CLIENT_ID" \
-          --data-urlencode "client_secret=$ARM_CLIENT_SECRET" \
+          --data-urlencode "client_secret=$CLIENT_SECRET" \
           --data-urlencode "grant_type=client_credentials" \
           --data-urlencode "scope=https://graph.microsoft.com/.default")
       fi
@@ -147,10 +149,11 @@ resource "null_resource" "app_identifier_uris_ps" {
     # Inject tenant/client from Terraform's own auth context so the script
     # doesn't depend on ARM_* vars being inherited by the subprocess.
     environment = {
-      TF_TENANT_ID = data.azurerm_client_config.current.tenant_id
-      TF_CLIENT_ID = data.azurerm_client_config.current.client_id
-      TF_OBJECT_ID = azuread_application.this.object_id
-      TF_URI_BODY  = jsonencode({ identifierUris = var.saml_identifier_uris })
+      TF_TENANT_ID     = data.azurerm_client_config.current.tenant_id
+      TF_CLIENT_ID     = data.azurerm_client_config.current.client_id
+      TF_OBJECT_ID     = azuread_application.this.object_id
+      TF_URI_BODY      = jsonencode({ identifierUris = var.saml_identifier_uris })
+      TF_CLIENT_SECRET = coalesce(var.graph_client_secret, "")
     }
     command = <<-EOT
       $ErrorActionPreference = 'Stop'
@@ -159,7 +162,7 @@ resource "null_resource" "app_identifier_uris_ps" {
       $objectId     = $env:TF_OBJECT_ID
       $body         = $env:TF_URI_BODY
       $oidcToken    = $env:ARM_OIDC_TOKEN
-      $clientSecret = $env:ARM_CLIENT_SECRET
+      $clientSecret = if ($env:TF_CLIENT_SECRET) { $env:TF_CLIENT_SECRET } else { $env:ARM_CLIENT_SECRET }
       $tokenUri     = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token"
       $tok          = $null
 
