@@ -2,8 +2,7 @@ locals {
   full_name         = "DG-${var.app_name}"
   cert_display_name = coalesce(var.saml_certificate_display_name, "CN=${local.full_name}")
   # Detect Windows by checking for a drive-letter colon in the home path (C:\...)
-  is_windows        = substr(pathexpand("~"), 1, 1) == ":"
-  interpreter       = local.is_windows ? ["powershell", "-Command"] : ["/bin/sh", "-c"]
+  is_windows = substr(pathexpand("~"), 1, 1) == ":"
 }
 
 # ---------------------------------------------------------------------------
@@ -72,12 +71,9 @@ resource "azuread_application" "this" {
 # is deleted — Entra blocks SP deletion when non-verified URIs are present.
 # depends_on includes the SP so this resource is destroyed first (reverse order).
 
-# Patch identifier URIs using the appropriate shell for the current OS.
-# local.is_windows auto-detects Windows via the home-path drive letter.
-# The PowerShell path pipes the JSON body via stdin (@-) to avoid Windows
-# argument-parsing issues with inline JSON.
+# Linux/macOS — auto-selected when pathexpand("~") starts with / (not a Windows drive letter)
 resource "null_resource" "app_identifier_uris" {
-  count = length(var.saml_identifier_uris) > 0 ? 1 : 0
+  count = length(var.saml_identifier_uris) > 0 && !local.is_windows ? 1 : 0
 
   triggers = {
     object_id       = azuread_application.this.object_id
@@ -85,16 +81,8 @@ resource "null_resource" "app_identifier_uris" {
   }
 
   provisioner "local-exec" {
-    interpreter = local.interpreter
-    command     = local.is_windows ? <<-EOT
-      $ErrorActionPreference = 'Stop'
-      $result = az account show 2>$null
-      if (-not $result) {
-        az login --service-principal --federated-token $env:ARM_OIDC_TOKEN --username $env:ARM_CLIENT_ID --tenant $env:ARM_TENANT_ID --allow-no-subscriptions | Out-Null
-      }
-      '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}' | az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body '@-'
-    EOT
-    : <<-EOT
+    interpreter = ["/bin/sh", "-c"]
+    command     = <<-EOT
       set -e
       if ! az account show > /dev/null 2>&1; then
         az login --service-principal \
@@ -111,16 +99,8 @@ resource "null_resource" "app_identifier_uris" {
 
   provisioner "local-exec" {
     when        = destroy
-    interpreter = local.interpreter
-    command     = local.is_windows ? <<-EOT
-      $ErrorActionPreference = 'Stop'
-      $result = az account show 2>$null
-      if (-not $result) {
-        az login --service-principal --federated-token $env:ARM_OIDC_TOKEN --username $env:ARM_CLIENT_ID --tenant $env:ARM_TENANT_ID --allow-no-subscriptions | Out-Null
-      }
-      '{"identifierUris": []}' | az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${self.triggers.object_id}" --body '@-'
-    EOT
-    : <<-EOT
+    interpreter = ["/bin/sh", "-c"]
+    command     = <<-EOT
       set -e
       if ! az account show > /dev/null 2>&1; then
         az login --service-principal \
@@ -132,6 +112,44 @@ resource "null_resource" "app_identifier_uris" {
       az rest --method PATCH \
         --url "https://graph.microsoft.com/v1.0/applications/${self.triggers.object_id}" \
         --body '{"identifierUris": []}'
+    EOT
+  }
+
+  depends_on = [azuread_application.this, azuread_service_principal.this]
+}
+
+# Windows — auto-selected when pathexpand("~") contains a drive letter (C:\...)
+# Pipes JSON body via stdin (@-) to avoid Windows argument-parsing issues with inline JSON.
+resource "null_resource" "app_identifier_uris_win" {
+  count = length(var.saml_identifier_uris) > 0 && local.is_windows ? 1 : 0
+
+  triggers = {
+    object_id       = azuread_application.this.object_id
+    identifier_uris = jsonencode(var.saml_identifier_uris)
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["powershell", "-Command"]
+    command     = <<-EOT
+      $ErrorActionPreference = 'Stop'
+      $result = az account show 2>$null
+      if (-not $result) {
+        az login --service-principal --federated-token $env:ARM_OIDC_TOKEN --username $env:ARM_CLIENT_ID --tenant $env:ARM_TENANT_ID --allow-no-subscriptions | Out-Null
+      }
+      '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}' | az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body '@-'
+    EOT
+  }
+
+  provisioner "local-exec" {
+    when        = destroy
+    interpreter = ["powershell", "-Command"]
+    command     = <<-EOT
+      $ErrorActionPreference = 'Stop'
+      $result = az account show 2>$null
+      if (-not $result) {
+        az login --service-principal --federated-token $env:ARM_OIDC_TOKEN --username $env:ARM_CLIENT_ID --tenant $env:ARM_TENANT_ID --allow-no-subscriptions | Out-Null
+      }
+      '{"identifierUris": []}' | az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${self.triggers.object_id}" --body '@-'
     EOT
   }
 
