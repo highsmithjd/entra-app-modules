@@ -138,8 +138,9 @@ resource "null_resource" "app_identifier_uris_win" {
       }
       $tmp = [System.IO.Path]::GetTempFileName()
       try {
-        '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}' | Set-Content -Path $tmp -Encoding utf8
-        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp"
+        [System.IO.File]::WriteAllText($tmp, '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}')
+        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp" --headers "Content-Type=application/json"
+        if ($LASTEXITCODE -ne 0) { throw "az rest failed with exit code $LASTEXITCODE" }
       } finally {
         Remove-Item $tmp -ErrorAction SilentlyContinue
       }
@@ -157,8 +158,9 @@ resource "null_resource" "app_identifier_uris_win" {
       }
       $tmp = [System.IO.Path]::GetTempFileName()
       try {
-        '{"identifierUris": []}' | Set-Content -Path $tmp -Encoding utf8
-        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${self.triggers.object_id}" --body "@$tmp"
+        [System.IO.File]::WriteAllText($tmp, '{"identifierUris": []}')
+        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${self.triggers.object_id}" --body "@$tmp" --headers "Content-Type=application/json"
+        if ($LASTEXITCODE -ne 0) { throw "az rest failed with exit code $LASTEXITCODE" }
       } finally {
         Remove-Item $tmp -ErrorAction SilentlyContinue
       }
