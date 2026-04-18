@@ -5,7 +5,7 @@ Terraform modules for deploying Microsoft Entra ID (Azure AD) applications.
 - **[entra-enterprise-app](#module-entra-enterprise-app)** — SAML Enterprise Applications (for SaaS vendors like Google, Oracle, Salesforce, etc.)
 - **[entra-app-registration](#module-entra-app-registration)** — OAuth 2.0 / OIDC App Registrations (for internal apps, APIs, daemons, and CI/CD pipelines)
 
-All apps are automatically prefixed with `DG-`. Both modules support an optional Key Vault for secret and certificate storage — see [Key Vault](#key-vault) below.
+All apps are automatically prefixed with `DG-`. The `entra-app-registration` module supports an optional Key Vault for secret and certificate storage — see [Key Vault](#key-vault) below.
 
 ---
 
@@ -32,12 +32,15 @@ Use this module for SAML-based SSO with SaaS vendors. It creates the application
 
 ```hcl
 module "saml_app" {
-  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-enterprise-app?ref=main"
+  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-enterprise-app?ref=v2.15.1"
 
   app_name             = "MyVendorApp"
-  saml_identifier_uris = ["https://myvendorapp.example.com"]
+  saml_identifier_uris = ["https://myvendorapp.example.com/saml/metadata"]
   saml_reply_urls      = ["https://myvendorapp.example.com/saml/acs"]
   saml_logout_url      = "https://myvendorapp.example.com/saml/logout"
+
+  saml_signing_certificate_enabled = true
+  notification_email_addresses     = ["platform-team@example.com"]
 
   app_role_assignments = [
     {
@@ -46,8 +49,12 @@ module "saml_app" {
     }
   ]
 
+  saml_group_claim = {
+    enabled = true
+    scope   = "ApplicationGroup"
+  }
+
   notes = "Owner: platform-team | Ticket: PLAT-1234"
-  tags  = ["platform-team", "saml", "production"]
 }
 ```
 
@@ -56,8 +63,8 @@ module "saml_app" {
 - `azuread_application` — the app registration, configured for SAML
 - `azuread_service_principal` — the enterprise app instance in your tenant
 - `azuread_service_principal_token_signing_certificate` — Entra-managed SAML signing certificate (optional)
-- `azuread_application_password` — client secret (optional, uncommon for SAML)
 - `azuread_app_role_assignment` — assigns users/groups to the app (optional)
+- `null_resource` — runs an `az rest` PATCH after creation to set the Entity ID (see below)
 
 ### How SAML works with this module
 
@@ -70,24 +77,68 @@ Entra acts as the Identity Provider (IdP). The SaaS vendor is the Service Provid
 
 The vendor never contacts your infrastructure directly — everything goes through Entra's public endpoints.
 
+### Why Entity IDs require a post-creation PATCH
+
+You may notice the module uses a `null_resource` provisioner to run `az rest` after the app is created, rather than setting `saml_identifier_uris` directly on the `azuread_application` resource. This is an intentional workaround for a quirk in the Graph API.
+
+The public Graph API (`POST /applications`) rejects vendor-supplied Entity IDs (e.g. `https://vendor.com/saml/metadata` or `urn:vendor:app`) at creation time because they don't match a verified domain in your tenant. A subsequent `PATCH /applications/{id}` bypasses this check and sets the value correctly — which is exactly what the Azure portal does internally.
+
+> **Why does the portal work but the API doesn't?**
+> The Azure portal is a Microsoft first-party application with elevated internal permissions. When you set the Entity ID in the GUI, the portal calls internal Microsoft APIs that skip the verified-domain check, then presents the result as a seamless single operation. External API callers using the public Graph API don't have those elevated permissions, so the POST-time validation is enforced. The PATCH workaround replicates what the portal does under the hood.
+
+The provisioner retries up to 6 times with a 10-second delay to handle Entra's eventual consistency — the app object is sometimes not immediately queryable by the Graph API right after creation.
+
+### Windows support
+
+The provisioner auto-detects the operating system and uses the appropriate shell:
+
+- **Linux / macOS** — `/bin/sh`
+- **Windows** — PowerShell, writing the JSON body to a temp file to avoid Windows argument-parsing issues
+
+No configuration is needed. The `use_powershell_provisioner` variable is accepted for backwards compatibility but is ignored.
+
 ### Variables
 
 | Name | Description | Type | Default | Required |
 |---|---|---|---|---|
 | `app_name` | Short name. Will be prefixed with `DG-`. | `string` | — | yes |
-| `saml_identifier_uris` | SAML entity IDs / audience URIs from the SP. | `list(string)` | `[]` | yes |
-| `saml_reply_urls` | Assertion Consumer Service (ACS) URLs. | `list(string)` | `[]` | yes |
+| `saml_identifier_uris` | SAML Entity IDs / Audience URIs provided by the SP. | `list(string)` | `[]` | no |
+| `saml_reply_urls` | Assertion Consumer Service (ACS) URLs. | `list(string)` | `[]` | no |
 | `saml_logout_url` | Single logout URL. | `string` | `null` | no |
 | `saml_signing_certificate_enabled` | Create an Entra-managed SAML signing certificate. | `bool` | `true` | no |
-| `saml_certificate_display_name` | Display name for the signing cert. Defaults to `CN=<app_name>`. | `string` | `null` | no |
-| `client_secret_enabled` | Create a client secret (uncommon for SAML). | `bool` | `false` | no |
-| `client_secret_display_name` | Display name for the client secret. | `string` | `"terraform-managed"` | no |
-| `client_secret_expiry_days` | Days until the client secret expires (max 730). | `number` | `365` | no |
+| `saml_certificate_display_name` | Display name for the signing cert. Defaults to `CN=DG-<app_name>`. | `string` | `null` | no |
+| `saml_group_claim` | Emit a groups claim in the SAML token. See [Groups Claim](#groups-claim). | `object` | `{}` | no |
+| `notification_email_addresses` | Emails to notify when the signing certificate is near expiry. | `list(string)` | `[]` | no |
 | `app_role_assignments` | Users/groups to assign to the app. See [App Role Assignments](#app-role-assignments). | `list(object)` | `[]` | no |
 | `feature_tags` | Controls portal visibility. See [Feature Tags](#feature-tags). | `object` | `{}` | no |
 | `notes` | Free-text notes on the app object (owner, team, ticket, etc.). | `string` | `null` | no |
 | `owners` | Entra object IDs to set as app owners. The Terraform caller is always added. | `list(string)` | `[]` | no |
-| `tags` | Flat string list on the service principal (e.g. `["platform-team", "prod"]`). | `list(string)` | `[]` | no |
+
+### Groups Claim
+
+Controls whether and how group membership is included in the SAML token. Useful when the SP needs to know which groups a user belongs to for authorization decisions.
+
+```hcl
+saml_group_claim = {
+  enabled = true
+  scope   = "ApplicationGroup"  # only groups assigned to this app (recommended)
+  format  = []                  # emit Object IDs (default); see below for alternatives
+}
+```
+
+| `scope` | What's included |
+|---|---|
+| `ApplicationGroup` | Only groups assigned to this app (recommended — keeps tokens small) |
+| `SecurityGroup` | All security groups the user is a member of |
+| `DirectoryRole` | Azure AD directory roles |
+| `All` | All groups and directory roles |
+
+| `format` | Value emitted per group |
+|---|---|
+| `[]` | Object ID / GUID (default) |
+| `["cloud_displayname"]` | Display name (cloud-only groups) |
+| `["sam_account_name"]` | sAMAccountName (on-prem synced groups) |
+| `["dns_domain_and_sam_account_name"]` | DNS\sAMAccountName (on-prem synced groups) |
 
 ### Outputs
 
@@ -97,10 +148,8 @@ The vendor never contacts your infrastructure directly — everything goes throu
 | `application_object_id` | Object ID of the app registration | no |
 | `service_principal_object_id` | Object ID of the service principal | no |
 | `display_name` | Full display name (with `DG-` prefix) | no |
-| `saml_metadata_url` | Entra federation metadata URL to give to the SP | no |
+| `saml_metadata_url` | Entra federation metadata URL — give this to the SP vendor | no |
 | `signing_certificate` | Cert thumbprint, display name, expiry, and value | yes |
-| `client_secret` | Client secret value (null if not created) | yes |
-| `client_secret_expiry` | Client secret expiry date | no |
 
 ---
 
