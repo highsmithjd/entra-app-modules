@@ -139,8 +139,14 @@ resource "null_resource" "app_identifier_uris_win" {
       $tmp = [System.IO.Path]::GetTempFileName()
       try {
         [System.IO.File]::WriteAllText($tmp, '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}')
-        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp" --headers "Content-Type=application/json"
-        if ($LASTEXITCODE -ne 0) { throw "az rest failed with exit code $LASTEXITCODE" }
+        $retries = 6; $delay = 10
+        for ($i = 1; $i -le $retries; $i++) {
+          az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp" --headers "Content-Type=application/json"
+          if ($LASTEXITCODE -eq 0) { break }
+          if ($i -eq $retries) { throw "az rest failed after $retries attempts" }
+          Write-Host "Attempt $i failed, retrying in $delay seconds..."
+          Start-Sleep -Seconds $delay
+        }
       } finally {
         Remove-Item $tmp -ErrorAction SilentlyContinue
       }
