@@ -150,3 +150,13 @@ variable "owners" {
   type        = list(string)
   default     = []
 }
+
+# ---------------------------------------------------------------------------
+# Runner
+# ---------------------------------------------------------------------------
+
+variable "use_powershell_provisioner" {
+  description = "Set to true when running on a Windows machine where /bin/sh is not available. Uses PowerShell with az rest instead of sh. Defaults to false (Linux/macOS)."
+  type        = bool
+  default     = false
+}

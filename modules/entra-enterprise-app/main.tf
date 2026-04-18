@@ -69,8 +69,9 @@ resource "azuread_application" "this" {
 # is deleted — Entra blocks SP deletion when non-verified URIs are present.
 # depends_on includes the SP so this resource is destroyed first (reverse order).
 
+# Linux/macOS runner (default)
 resource "null_resource" "app_identifier_uris" {
-  count = length(var.saml_identifier_uris) > 0 ? 1 : 0
+  count = length(var.saml_identifier_uris) > 0 && !var.use_powershell_provisioner ? 1 : 0
 
   triggers = {
     object_id       = azuread_application.this.object_id
@@ -78,9 +79,8 @@ resource "null_resource" "app_identifier_uris" {
   }
 
   provisioner "local-exec" {
-    # Works locally (az login --service-principal already done) and in GitLab CI
-    # (ARM_OIDC_TOKEN / ARM_CLIENT_ID / ARM_TENANT_ID set by the OIDC job config).
-    command = <<-EOT
+    interpreter = ["/bin/sh", "-c"]
+    command     = <<-EOT
       set -e
       if ! az account show > /dev/null 2>&1; then
         az login --service-principal \
@@ -96,8 +96,9 @@ resource "null_resource" "app_identifier_uris" {
   }
 
   provisioner "local-exec" {
-    when = destroy
-    command = <<-EOT
+    when        = destroy
+    interpreter = ["/bin/sh", "-c"]
+    command     = <<-EOT
       set -e
       if ! az account show > /dev/null 2>&1; then
         az login --service-principal \
@@ -112,8 +113,56 @@ resource "null_resource" "app_identifier_uris" {
     EOT
   }
 
-  # SP is included so this resource is destroyed before the SP (reverse dep order),
-  # giving the destroy provisioner a chance to clear identifierUris first.
+  depends_on = [azuread_application.this, azuread_service_principal.this]
+}
+
+# Windows runner — uses PowerShell with az rest (same logic, no Invoke-RestMethod)
+resource "null_resource" "app_identifier_uris_ps" {
+  count = length(var.saml_identifier_uris) > 0 && var.use_powershell_provisioner ? 1 : 0
+
+  triggers = {
+    object_id       = azuread_application.this.object_id
+    identifier_uris = jsonencode(var.saml_identifier_uris)
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["powershell", "-Command"]
+    command     = <<-EOT
+      $ErrorActionPreference = 'Stop'
+      $result = az account show 2>$null
+      if (-not $result) {
+        az login --service-principal `
+          --federated-token $env:ARM_OIDC_TOKEN `
+          --username $env:ARM_CLIENT_ID `
+          --tenant $env:ARM_TENANT_ID `
+          --allow-no-subscriptions | Out-Null
+      }
+      $body = '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}'
+      az rest --method PATCH `
+        --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" `
+        --body $body
+    EOT
+  }
+
+  provisioner "local-exec" {
+    when        = destroy
+    interpreter = ["powershell", "-Command"]
+    command     = <<-EOT
+      $ErrorActionPreference = 'Stop'
+      $result = az account show 2>$null
+      if (-not $result) {
+        az login --service-principal `
+          --federated-token $env:ARM_OIDC_TOKEN `
+          --username $env:ARM_CLIENT_ID `
+          --tenant $env:ARM_TENANT_ID `
+          --allow-no-subscriptions | Out-Null
+      }
+      az rest --method PATCH `
+        --url "https://graph.microsoft.com/v1.0/applications/${self.triggers.object_id}" `
+        --body '{"identifierUris": []}'
+    EOT
+  }
+
   depends_on = [azuread_application.this, azuread_service_principal.this]
 }
 
