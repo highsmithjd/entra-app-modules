@@ -37,6 +37,44 @@ variable "saml_logout_url" {
 }
 
 # ---------------------------------------------------------------------------
+# SAML Claims
+# ---------------------------------------------------------------------------
+
+variable "saml_group_claim" {
+  description = <<-EOT
+    Configure the groups claim emitted in the SAML token.
+
+    scope — which groups to include:
+      "ApplicationGroup"  Groups assigned to this application only (recommended)
+      "SecurityGroup"     All security groups the user is a member of
+      "DirectoryRole"     Azure AD directory roles
+      "All"               All groups and directory roles
+      "None"              No group claim
+
+    format — the value emitted for each group (additional_properties):
+      []                                      Object ID / GUID (default)
+      ["sam_account_name"]                    sAMAccountName (on-prem synced)
+      ["netbios_domain_and_sam_account_name"] NETBIOS\sAMAccountName (on-prem)
+      ["dns_domain_and_sam_account_name"]     DNS\sAMAccountName (on-prem)
+      ["cloud_displayname"]                   Display name (cloud-only groups)
+  EOT
+  type = object({
+    enabled = optional(bool, false)
+    scope   = optional(string, "ApplicationGroup")
+    format  = optional(list(string), [])
+  })
+  default = {}
+
+  validation {
+    condition = contains(
+      ["None", "SecurityGroup", "DirectoryRole", "ApplicationGroup", "All"],
+      var.saml_group_claim.scope
+    )
+    error_message = "saml_group_claim.scope must be one of: None, SecurityGroup, DirectoryRole, ApplicationGroup, All."
+  }
+}
+
+# ---------------------------------------------------------------------------
 # SAML Signing Certificate
 # ---------------------------------------------------------------------------
 

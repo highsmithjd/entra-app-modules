@@ -32,6 +32,9 @@ resource "azuread_application" "this" {
     var.owners
   ))
 
+  # Group claim scope — controls which groups appear in the SAML token
+  group_membership_claims = var.saml_group_claim.enabled ? [var.saml_group_claim.scope] : null
+
   # SAML configuration lives under the web block
   web {
     redirect_uris = var.saml_reply_urls
@@ -40,6 +43,17 @@ resource "azuread_application" "this" {
     implicit_grant {
       access_token_issuance_enabled = false
       id_token_issuance_enabled     = false
+    }
+  }
+
+  # Add groups claim to the SAML token when enabled
+  dynamic "optional_claims" {
+    for_each = var.saml_group_claim.enabled ? [1] : []
+    content {
+      saml2_token {
+        name                  = "groups"
+        additional_properties = var.saml_group_claim.format
+      }
     }
   }
 
