@@ -136,7 +136,13 @@ resource "null_resource" "app_identifier_uris_win" {
       if (-not $result) {
         az login --service-principal --federated-token $env:ARM_OIDC_TOKEN --username $env:ARM_CLIENT_ID --tenant $env:ARM_TENANT_ID --allow-no-subscriptions | Out-Null
       }
-      '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}' | az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body '@-' --headers "Content-Type=application/json"
+      $tmp = [System.IO.Path]::GetTempFileName()
+      try {
+        '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}' | Set-Content -Path $tmp -Encoding utf8
+        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp"
+      } finally {
+        Remove-Item $tmp -ErrorAction SilentlyContinue
+      }
     EOT
   }
 
@@ -149,7 +155,13 @@ resource "null_resource" "app_identifier_uris_win" {
       if (-not $result) {
         az login --service-principal --federated-token $env:ARM_OIDC_TOKEN --username $env:ARM_CLIENT_ID --tenant $env:ARM_TENANT_ID --allow-no-subscriptions | Out-Null
       }
-      '{"identifierUris": []}' | az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${self.triggers.object_id}" --body '@-' --headers "Content-Type=application/json"
+      $tmp = [System.IO.Path]::GetTempFileName()
+      try {
+        '{"identifierUris": []}' | Set-Content -Path $tmp -Encoding utf8
+        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${self.triggers.object_id}" --body "@$tmp"
+      } finally {
+        Remove-Item $tmp -ErrorAction SilentlyContinue
+      }
     EOT
   }
 
