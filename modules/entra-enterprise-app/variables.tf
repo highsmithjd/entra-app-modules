@@ -156,7 +156,7 @@ variable "owners" {
 # ---------------------------------------------------------------------------
 
 variable "use_powershell_provisioner" {
-  description = "Set to true when running on a Windows machine where /bin/sh is not available. Uses PowerShell with az rest instead of sh. Defaults to false (Linux/macOS)."
+  description = "Deprecated — the module now auto-detects Windows. This variable is accepted but ignored."
   type        = bool
   default     = false
 }
