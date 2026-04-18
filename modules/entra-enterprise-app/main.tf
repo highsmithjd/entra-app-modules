@@ -91,9 +91,15 @@ resource "null_resource" "app_identifier_uris" {
           --tenant "$ARM_TENANT_ID" \
           --allow-no-subscriptions > /dev/null
       fi
-      az rest --method PATCH \
-        --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
-        --body '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}'
+      retries=6; delay=10
+      for i in $(seq 1 $retries); do
+        az rest --method PATCH \
+          --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
+          --body '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}' && break
+        [ $i -eq $retries ] && exit 1
+        echo "Attempt $i failed, retrying in $${delay}s..."
+        sleep $delay
+      done
     EOT
   }
 
