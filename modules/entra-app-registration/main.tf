@@ -50,8 +50,8 @@ resource "azuread_application" "this" {
       logout_url    = var.logout_url
 
       implicit_grant {
-        access_token_issuance_enabled = var.access_token_issuance_enabled
-        id_token_issuance_enabled     = var.id_token_issuance_enabled
+        access_token_issuance_enabled = false
+        id_token_issuance_enabled     = false
       }
     }
   }

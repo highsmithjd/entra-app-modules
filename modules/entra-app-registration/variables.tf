@@ -45,18 +45,6 @@ variable "logout_url" {
   default     = null
 }
 
-variable "access_token_issuance_enabled" {
-  description = "Allow implicit access token issuance. Only enable for legacy apps that require it."
-  type        = bool
-  default     = false
-}
-
-variable "id_token_issuance_enabled" {
-  description = "Allow implicit ID token issuance. Set true for OIDC implicit flows (not recommended for new apps)."
-  type        = bool
-  default     = false
-}
-
 # ---------------------------------------------------------------------------
 # Key Vault
 # ---------------------------------------------------------------------------
