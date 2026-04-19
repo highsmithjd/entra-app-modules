@@ -91,6 +91,10 @@ resource "null_resource" "app_identifier_uris" {
           --tenant "$ARM_TENANT_ID" \
           --allow-no-subscriptions > /dev/null
       fi
+      az rest --method PATCH \
+        --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
+        --body '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}' \
+        --headers "Content-Type=application/json"
       retries=6; delay=10
       for i in $(seq 1 $retries); do
         az rest --method PATCH \
@@ -101,11 +105,6 @@ resource "null_resource" "app_identifier_uris" {
         echo "Attempt $i failed, retrying in $${delay}s..."
         sleep $delay
       done
-      az rest --method PATCH \
-        --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
-        --body '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}' \
-        --headers "Content-Type=application/json" \
-        || echo "Note: applicationTemplateId patch was rejected (likely immutable after creation)"
     EOT
   }
 
@@ -151,23 +150,23 @@ resource "null_resource" "app_identifier_uris_win" {
       }
       $tmp = [System.IO.Path]::GetTempFileName()
       try {
-        [System.IO.File]::WriteAllText($tmp, '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}')
-        $retries = 6; $delay = 10
-        for ($i = 1; $i -le $retries; $i++) {
-          az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp" --headers "Content-Type=application/json"
-          if ($LASTEXITCODE -eq 0) { break }
-          if ($i -eq $retries) { throw "az rest failed after $retries attempts" }
-          Write-Host "Attempt $i failed, retrying in $delay seconds..."
-          Start-Sleep -Seconds $delay
-        }
+        [System.IO.File]::WriteAllText($tmp, '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}')
+        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp" --headers "Content-Type=application/json"
+        if ($LASTEXITCODE -ne 0) { throw "applicationTemplateId patch failed" }
       } finally {
         Remove-Item $tmp -ErrorAction SilentlyContinue
       }
       $tmp2 = [System.IO.Path]::GetTempFileName()
       try {
-        [System.IO.File]::WriteAllText($tmp2, '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}')
-        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp2" --headers "Content-Type=application/json"
-        if ($LASTEXITCODE -ne 0) { Write-Host "Note: applicationTemplateId patch was rejected (likely immutable after creation)" }
+        [System.IO.File]::WriteAllText($tmp2, '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}')
+        $retries = 6; $delay = 10
+        for ($i = 1; $i -le $retries; $i++) {
+          az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp2" --headers "Content-Type=application/json"
+          if ($LASTEXITCODE -eq 0) { break }
+          if ($i -eq $retries) { throw "az rest failed after $retries attempts" }
+          Write-Host "Attempt $i failed, retrying in $delay seconds..."
+          Start-Sleep -Seconds $delay
+        }
       } finally {
         Remove-Item $tmp2 -ErrorAction SilentlyContinue
       }
