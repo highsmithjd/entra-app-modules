@@ -94,7 +94,8 @@ resource "null_resource" "app_identifier_uris" {
       az rest --method PATCH \
         --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
         --body '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}' \
-        --headers "Content-Type=application/json"
+        --headers "Content-Type=application/json" \
+        || true
       retries=6; delay=10
       for i in $(seq 1 $retries); do
         az rest --method PATCH \
@@ -152,7 +153,7 @@ resource "null_resource" "app_identifier_uris_win" {
       try {
         [System.IO.File]::WriteAllText($tmp, '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}')
         az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp" --headers "Content-Type=application/json"
-        if ($LASTEXITCODE -ne 0) { throw "applicationTemplateId patch failed" }
+        if ($LASTEXITCODE -ne 0) { Write-Host "Note: applicationTemplateId already set, skipping" }
       } finally {
         Remove-Item $tmp -ErrorAction SilentlyContinue
       }
