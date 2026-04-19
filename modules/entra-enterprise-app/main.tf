@@ -101,6 +101,11 @@ resource "null_resource" "app_identifier_uris" {
         echo "Attempt $i failed, retrying in $${delay}s..."
         sleep $delay
       done
+      az rest --method PATCH \
+        --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
+        --body '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}' \
+        --headers "Content-Type=application/json" \
+        || echo "Note: applicationTemplateId patch was rejected (likely immutable after creation)"
     EOT
   }
 
@@ -157,6 +162,14 @@ resource "null_resource" "app_identifier_uris_win" {
         }
       } finally {
         Remove-Item $tmp -ErrorAction SilentlyContinue
+      }
+      $tmp2 = [System.IO.Path]::GetTempFileName()
+      try {
+        [System.IO.File]::WriteAllText($tmp2, '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}')
+        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp2" --headers "Content-Type=application/json"
+        if ($LASTEXITCODE -ne 0) { Write-Host "Note: applicationTemplateId patch was rejected (likely immutable after creation)" }
+      } finally {
+        Remove-Item $tmp2 -ErrorAction SilentlyContinue
       }
     EOT
   }
