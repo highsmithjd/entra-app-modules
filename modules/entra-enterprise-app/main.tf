@@ -95,7 +95,8 @@ resource "null_resource" "app_identifier_uris" {
       for i in $(seq 1 $retries); do
         az rest --method PATCH \
           --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
-          --body '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}' && break
+          --body '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}' \
+          --headers "Content-Type=application/json" && break
         [ $i -eq $retries ] && exit 1
         echo "Attempt $i failed, retrying in $${delay}s..."
         sleep $delay
@@ -117,7 +118,8 @@ resource "null_resource" "app_identifier_uris" {
       fi
       az rest --method PATCH \
         --url "https://graph.microsoft.com/v1.0/applications/${self.triggers.object_id}" \
-        --body '{"identifierUris": []}'
+        --body '{"identifierUris": []}' \
+        --headers "Content-Type=application/json"
     EOT
   }
 
