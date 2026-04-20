@@ -129,13 +129,9 @@ resource "null_resource" "app_identifier_uris" {
           --tenant "$ARM_TENANT_ID" \
           --allow-no-subscriptions > /dev/null
       fi
-      # Post-creation template link enables the verified-domain bypass for identifierUris.
-      # template_id at creation time alone is not sufficient for this bypass.
-      az rest --method PATCH \
-        --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
-        --body '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}' \
-        --headers "Content-Type=application/json" \
-        || true
+      # The SAML exemption from verified-domain restrictions applies once the SP has
+      # preferredSingleSignOnMode=saml — which depends_on guarantees before this runs.
+      # The retry loop handles Entra replication lag before the exemption propagates.
       %{~ if length(var.saml_identifier_uris) > 0}
       retries=6; delay=10
       for i in $(seq 1 $retries); do
@@ -210,16 +206,9 @@ resource "null_resource" "app_identifier_uris_win" {
       if (-not $result) {
         az login --service-principal --federated-token $env:ARM_OIDC_TOKEN --username $env:ARM_CLIENT_ID --tenant $env:ARM_TENANT_ID --allow-no-subscriptions | Out-Null
       }
-      # Post-creation template link enables the verified-domain bypass for identifierUris.
-      # template_id at creation time alone is not sufficient for this bypass.
-      $tmp_tmpl = [System.IO.Path]::GetTempFileName()
-      try {
-        [System.IO.File]::WriteAllText($tmp_tmpl, '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}')
-        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp_tmpl" --headers "Content-Type=application/json"
-        if ($LASTEXITCODE -ne 0) { Write-Host "Note: applicationTemplateId already set, skipping" }
-      } finally {
-        Remove-Item $tmp_tmpl -ErrorAction SilentlyContinue
-      }
+      # The SAML exemption from verified-domain restrictions applies once the SP has
+      # preferredSingleSignOnMode=saml — which depends_on guarantees before this runs.
+      # The retry loop handles Entra replication lag before the exemption propagates.
       %{~ if length(var.saml_identifier_uris) > 0}
       $tmp2 = [System.IO.Path]::GetTempFileName()
       try {
