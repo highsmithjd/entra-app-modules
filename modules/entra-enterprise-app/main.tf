@@ -124,6 +124,7 @@ resource "null_resource" "app_identifier_uris" {
         --body '{"preferredTokenSigningKeyThumbprint": "${azuread_service_principal_token_signing_certificate.this[0].thumbprint}"}' \
         --headers "Content-Type=application/json"
       %{~ endif}
+      sleep 20
     EOT
   }
 
@@ -201,6 +202,7 @@ resource "null_resource" "app_identifier_uris_win" {
         Remove-Item $tmp_cert -ErrorAction SilentlyContinue
       }
       %{~ endif}
+      Start-Sleep -Seconds 20
     EOT
   }
 
