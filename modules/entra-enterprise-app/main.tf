@@ -4,32 +4,6 @@ locals {
   # Detect Windows by checking for a drive-letter colon in the home path (C:\...)
   is_windows = substr(pathexpand("~"), 1, 1) == ":"
 
-  # Payload and URL for the internal portal API that backs the SAML SSO edit blade
-  # and federation metadata. The public Graph API identifierUris patch is necessary
-  # but not sufficient — this API writes to a separate config store that the portal
-  # and federation metadata endpoint actually read from.
-  _saml_sso_url = "https://main.iam.ad.ext.azure.com/api/ApplicationSso/${azuread_service_principal.this.object_id}/FederatedSsoConfigV4/${azuread_application.this.client_id}"
-
-  _saml_sso_config = jsonencode({
-    identifierUris  = var.saml_identifier_uris
-    idpIdentifier   = length(var.saml_identifier_uris) > 0 ? var.saml_identifier_uris[0] : ""
-    idpReplyUrl     = ""
-    logoutUrl       = var.saml_logout_url != null ? var.saml_logout_url : ""
-    objectId        = azuread_service_principal.this.object_id
-    replyUrls       = var.saml_reply_urls
-    redirectUriSettings = [for url in var.saml_reply_urls : { index = null, uri = url }]
-    relayState      = ""
-    signOnUrl       = ""
-    certificateNotificationEmail = length(var.notification_email_addresses) > 0 ? var.notification_email_addresses[0] : ""
-    tokenIssuancePolicy = {
-      emitSamlNameFormat         = false
-      samlTokenVersion           = "2.0"
-      signingAlgorithm           = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
-      tokenResponseSigningPolicy = "TokenOnly"
-      version                    = 1
-    }
-    tokenIssuancePolicySource = "default"
-  })
 }
 
 # ---------------------------------------------------------------------------
@@ -144,14 +118,6 @@ resource "null_resource" "app_identifier_uris" {
         sleep $delay
       done
       %{~ endif}
-      tmp_sso=$(mktemp)
-      echo '${local._saml_sso_config}' > "$tmp_sso"
-      az rest --method PATCH \
-        --url "${local._saml_sso_url}" \
-        --body "@$tmp_sso" \
-        --resource "74658136-14ec-4630-ad9b-26e160ff0fc6" \
-        --headers "Content-Type=application/json"
-      rm -f "$tmp_sso"
       %{~ if var.saml_signing_certificate_enabled}
       az rest --method PATCH \
         --url "https://graph.microsoft.com/v1.0/servicePrincipals/${azuread_service_principal.this.object_id}" \
@@ -225,14 +191,6 @@ resource "null_resource" "app_identifier_uris_win" {
         Remove-Item $tmp2 -ErrorAction SilentlyContinue
       }
       %{~ endif}
-      $tmp_sso = [System.IO.Path]::GetTempFileName()
-      try {
-        [System.IO.File]::WriteAllText($tmp_sso, '${local._saml_sso_config}')
-        az rest --method PATCH --url "${local._saml_sso_url}" --body "@$tmp_sso" --resource "74658136-14ec-4630-ad9b-26e160ff0fc6" --headers "Content-Type=application/json"
-        if ($LASTEXITCODE -ne 0) { throw "FederatedSsoConfig PATCH failed" }
-      } finally {
-        Remove-Item $tmp_sso -ErrorAction SilentlyContinue
-      }
       %{~ if var.saml_signing_certificate_enabled}
       $tmp_cert = [System.IO.Path]::GetTempFileName()
       try {
