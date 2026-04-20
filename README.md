@@ -16,7 +16,9 @@ All apps are automatically prefixed with `DG-`. The `entra-app-registration` mod
 | OpenTofu (preferred) | >= 1.3.0 |
 | Terraform (compatible) | >= 1.3.0 |
 | hashicorp/azuread provider | >= 2.47.0 |
-| hashicorp/time provider | >= 0.9.0 |
+| hashicorp/null provider | >= 3.0.0 |
+| hashicorp/time provider | >= 0.9.0 *(entra-app-registration only)* |
+| Azure CLI (`az`) | any recent version |
 
 The identity running Terraform needs one of the following Entra roles:
 - **Application Administrator** — can create and manage app registrations and enterprise apps
@@ -32,7 +34,7 @@ Use this module for SAML-based SSO with SaaS vendors. It creates the application
 
 ```hcl
 module "saml_app" {
-  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-enterprise-app?ref=v2.15.1"
+  source = "git::https://github.com/highsmithjd/entra-app-modules.git//modules/entra-enterprise-app?ref=v3.0.5"
 
   app_name             = "MyVendorApp"
   saml_identifier_uris = ["https://myvendorapp.example.com/saml/metadata"]
@@ -60,11 +62,11 @@ module "saml_app" {
 
 ### What gets created
 
-- `azuread_application` — the app registration, configured for SAML
-- `azuread_service_principal` — the enterprise app instance in your tenant
+- `azuread_application` — the app registration, linked to Entra's SAML template via `template_id`
+- `azuread_service_principal` — the enterprise app instance in your tenant, set to `preferredSingleSignOnMode = saml`
 - `azuread_service_principal_token_signing_certificate` — Entra-managed SAML signing certificate (optional)
-- `azuread_app_role_assignment` — assigns users/groups to the app (optional)
-- `null_resource` — runs an `az rest` PATCH after creation to set the Entity ID (see below)
+- `azuread_app_role_assignment` — assigns users/groups to the app's template-created "User" role (optional)
+- `null_resource` — runs `az rest` PATCHes after creation to set the Entity ID and activate the signing certificate (see below)
 
 ### How SAML works with this module
 
@@ -79,21 +81,28 @@ The vendor never contacts your infrastructure directly — everything goes throu
 
 ### Why Entity IDs require a post-creation PATCH
 
-You may notice the module uses a `null_resource` provisioner to run `az rest` after the app is created, rather than setting `saml_identifier_uris` directly on the `azuread_application` resource. This is an intentional workaround for a quirk in the Graph API.
+The Graph API (`POST /applications`) rejects vendor-supplied Entity IDs (e.g. `https://vendor.com/saml/metadata`) at creation time because they don't match a verified domain in your tenant. A subsequent `PATCH /applications/{id}` accepts them — provided the service principal already has `preferredSingleSignOnMode = saml`.
 
-The public Graph API (`POST /applications`) rejects vendor-supplied Entity IDs (e.g. `https://vendor.com/saml/metadata` or `urn:vendor:app`) at creation time because they don't match a verified domain in your tenant. A subsequent `PATCH /applications/{id}` bypasses this check and sets the value correctly — which is exactly what the Azure portal does internally.
+This module sets that property on the service principal at creation time, which qualifies the app for the [SAML verified-domain exemption](https://learn.microsoft.com/en-us/entra/identity-platform/identifier-uri-restrictions). The `null_resource` provisioner runs after the service principal is ready and PATCHes the Entity ID via the Graph API. A retry loop handles Entra's eventual consistency — the exemption sometimes takes a few seconds to propagate after the SP is created.
 
-> **Why does the portal work but the API doesn't?**
-> The Azure portal is a Microsoft first-party application with elevated internal permissions. When you set the Entity ID in the GUI, the portal calls internal Microsoft APIs that skip the verified-domain check, then presents the result as a seamless single operation. External API callers using the public Graph API don't have those elevated permissions, so the POST-time validation is enforced. The PATCH workaround replicates what the portal does under the hood.
+> **Why does the portal work but the API doesn't at creation time?**
+> The Azure portal sets `preferredSingleSignOnMode = saml` before writing the Entity ID, so the exemption is already in place. The Graph API enforces the verified-domain check at `POST` time before the SP exists, and there's no way to make both happen atomically. The PATCH workaround matches what the portal does under the hood.
 
-The provisioner retries up to 6 times with a 10-second delay to handle Entra's eventual consistency — the app object is sometimes not immediately queryable by the Graph API right after creation.
+### Why `template_id` is required
+
+The module sets `template_id = "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"` on the `azuread_application` resource. This links the app to Entra's built-in custom SAML application template, which:
+
+- Initializes the internal SAML configuration store that backs the portal's **Basic SAML Configuration** edit blade — without it, the blade renders read-only even when all Graph API values are correct
+- Auto-creates a "User" app role used for group/user assignments (the module resolves this role dynamically)
+
+> **Breaking change in v3.0.0:** existing apps created without `template_id` must be **destroyed and recreated** to pick up this change. In-place migration is not possible because `template_id` is a ForceNew attribute.
 
 ### Windows support
 
 The provisioner auto-detects the operating system and uses the appropriate shell:
 
 - **Linux / macOS** — `/bin/sh`
-- **Windows** — PowerShell, writing the JSON body to a temp file to avoid Windows argument-parsing issues
+- **Windows** — PowerShell, writing the JSON body to a temp file to avoid Windows argument-parsing issues with inline JSON and UTF-8 BOM issues with `Set-Content`
 
 No configuration is needed. The `use_powershell_provisioner` variable is accepted for backwards compatibility but is ignored.
 
