@@ -129,6 +129,13 @@ resource "null_resource" "app_identifier_uris" {
           --tenant "$ARM_TENANT_ID" \
           --allow-no-subscriptions > /dev/null
       fi
+      # Post-creation template link enables the verified-domain bypass for identifierUris.
+      # template_id at creation time alone is not sufficient for this bypass.
+      az rest --method PATCH \
+        --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
+        --body '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}' \
+        --headers "Content-Type=application/json" \
+        || true
       %{~ if length(var.saml_identifier_uris) > 0}
       retries=6; delay=10
       for i in $(seq 1 $retries); do
@@ -143,7 +150,7 @@ resource "null_resource" "app_identifier_uris" {
       %{~ endif}
       tmp_sso=$(mktemp)
       echo '${local._saml_sso_config}' > "$tmp_sso"
-      az rest --method PUT \
+      az rest --method PATCH \
         --url "${local._saml_sso_url}" \
         --body "@$tmp_sso" \
         --resource "74658136-14ec-4630-ad9b-26e160ff0fc6" \
@@ -203,6 +210,16 @@ resource "null_resource" "app_identifier_uris_win" {
       if (-not $result) {
         az login --service-principal --federated-token $env:ARM_OIDC_TOKEN --username $env:ARM_CLIENT_ID --tenant $env:ARM_TENANT_ID --allow-no-subscriptions | Out-Null
       }
+      # Post-creation template link enables the verified-domain bypass for identifierUris.
+      # template_id at creation time alone is not sufficient for this bypass.
+      $tmp_tmpl = [System.IO.Path]::GetTempFileName()
+      try {
+        [System.IO.File]::WriteAllText($tmp_tmpl, '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}')
+        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp_tmpl" --headers "Content-Type=application/json"
+        if ($LASTEXITCODE -ne 0) { Write-Host "Note: applicationTemplateId already set, skipping" }
+      } finally {
+        Remove-Item $tmp_tmpl -ErrorAction SilentlyContinue
+      }
       %{~ if length(var.saml_identifier_uris) > 0}
       $tmp2 = [System.IO.Path]::GetTempFileName()
       try {
@@ -222,8 +239,8 @@ resource "null_resource" "app_identifier_uris_win" {
       $tmp_sso = [System.IO.Path]::GetTempFileName()
       try {
         [System.IO.File]::WriteAllText($tmp_sso, '${local._saml_sso_config}')
-        az rest --method PUT --url "${local._saml_sso_url}" --body "@$tmp_sso" --resource "74658136-14ec-4630-ad9b-26e160ff0fc6" --headers "Content-Type=application/json"
-        if ($LASTEXITCODE -ne 0) { throw "FederatedSsoConfig PUT failed" }
+        az rest --method PATCH --url "${local._saml_sso_url}" --body "@$tmp_sso" --resource "74658136-14ec-4630-ad9b-26e160ff0fc6" --headers "Content-Type=application/json"
+        if ($LASTEXITCODE -ne 0) { throw "FederatedSsoConfig PATCH failed" }
       } finally {
         Remove-Item $tmp_sso -ErrorAction SilentlyContinue
       }
@@ -318,4 +335,11 @@ resource "azuread_app_role_assignment" "this" {
   app_role_id         = "00000000-0000-0000-0000-000000000000" # Default access role
   principal_object_id = each.value.principal_object_id
   resource_object_id  = azuread_service_principal.this.object_id
+
+  # Wait for provisioners to complete template linkage before assigning roles —
+  # the default access role may not be resolvable until the app is fully initialized.
+  depends_on = [
+    null_resource.app_identifier_uris,
+    null_resource.app_identifier_uris_win,
+  ]
 }
