@@ -43,6 +43,12 @@ resource "azuread_application" "this" {
   sign_in_audience = "AzureADMyOrg"
   notes            = var.notes
 
+  # Link to the custom SAML app template. This causes Entra to fully initialize
+  # the app as a SAML enterprise app — including the internal config store that
+  # backs the portal's Basic SAML Configuration edit blade. Without this, the
+  # blade renders read-only even when Graph API data looks correct.
+  template_id = "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"
+
   # Caller is always an owner; additional owners are appended
   owners = distinct(concat(
     [data.azuread_client_config.current.object_id],
@@ -83,28 +89,33 @@ resource "azuread_application" "this" {
   }
 
   lifecycle {
-    # Prevent accidental rename which would break SSO
-    ignore_changes = [display_name]
+    # Prevent accidental rename which would break SSO.
+    # Ignore template_id after creation — it's a ForceNew attribute and changing
+    # it would destroy the app; existing apps migrating to v3 must destroy+recreate.
+    ignore_changes = [display_name, template_id]
   }
 }
 
-# Patch identifier URIs after creation via a direct Graph API call.
-# The Graph API rejects vendor-supplied entity IDs (e.g. urn:vendor:app or
-# https://app.vendor.com) at creation time because they don't match a
-# verified domain. A subsequent PATCH bypasses this — matching what the
-# portal does internally.
+# Post-creation provisioner — runs on Linux/macOS (auto-selected via is_windows).
 #
-# The destroy provisioner clears identifierUris before the service principal
-# is deleted — Entra blocks SP deletion when non-verified URIs are present.
-# depends_on includes the SP so this resource is destroyed first (reverse order).
-
-# Linux/macOS — auto-selected when pathexpand("~") starts with / (not a Windows drive letter)
+# Responsibilities:
+#   1. PATCH identifierUris — Graph API rejects vendor entity IDs at creation time
+#      (unverified domain restriction), but accepts them on a subsequent PATCH.
+#   2. PUT FederatedSsoConfigV4 — writes to the internal config store that backs
+#      the portal's Basic SAML Configuration blade (belt-and-suspenders alongside
+#      template_id initialization).
+#   3. PATCH preferredTokenSigningKeyThumbprint — activates the signing cert; without
+#      this the cert is present but not used for SAML token signing.
+#
+# The destroy provisioner clears identifierUris before the app is deleted —
+# Entra blocks deletion when non-verified URIs are present.
 resource "null_resource" "app_identifier_uris" {
-  count = length(var.saml_identifier_uris) > 0 && !local.is_windows ? 1 : 0
+  count = !local.is_windows ? 1 : 0
 
   triggers = {
     object_id       = azuread_application.this.object_id
     identifier_uris = jsonencode(var.saml_identifier_uris)
+    cert_thumbprint = var.saml_signing_certificate_enabled ? azuread_service_principal_token_signing_certificate.this[0].thumbprint : ""
   }
 
   provisioner "local-exec" {
@@ -118,11 +129,7 @@ resource "null_resource" "app_identifier_uris" {
           --tenant "$ARM_TENANT_ID" \
           --allow-no-subscriptions > /dev/null
       fi
-      az rest --method PATCH \
-        --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" \
-        --body '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}' \
-        --headers "Content-Type=application/json" \
-        || true
+      %{~ if length(var.saml_identifier_uris) > 0}
       retries=6; delay=10
       for i in $(seq 1 $retries); do
         az rest --method PATCH \
@@ -133,6 +140,7 @@ resource "null_resource" "app_identifier_uris" {
         echo "Attempt $i failed, retrying in $${delay}s..."
         sleep $delay
       done
+      %{~ endif}
       tmp_sso=$(mktemp)
       echo '${local._saml_sso_config}' > "$tmp_sso"
       az rest --method PUT \
@@ -141,6 +149,12 @@ resource "null_resource" "app_identifier_uris" {
         --resource "74658136-14ec-4630-ad9b-26e160ff0fc6" \
         --headers "Content-Type=application/json"
       rm -f "$tmp_sso"
+      %{~ if var.saml_signing_certificate_enabled}
+      az rest --method PATCH \
+        --url "https://graph.microsoft.com/v1.0/servicePrincipals/${azuread_service_principal.this.object_id}" \
+        --body '{"preferredTokenSigningKeyThumbprint": "${azuread_service_principal_token_signing_certificate.this[0].thumbprint}"}' \
+        --headers "Content-Type=application/json"
+      %{~ endif}
     EOT
   }
 
@@ -163,17 +177,22 @@ resource "null_resource" "app_identifier_uris" {
     EOT
   }
 
-  depends_on = [azuread_application.this, azuread_service_principal.this]
+  depends_on = [
+    azuread_application.this,
+    azuread_service_principal.this,
+    azuread_service_principal_token_signing_certificate.this,
+  ]
 }
 
 # Windows — auto-selected when pathexpand("~") contains a drive letter (C:\...)
-# Pipes JSON body via stdin (@-) to avoid Windows argument-parsing issues with inline JSON.
+# Pipes JSON body via temp file to avoid Windows argument-parsing issues with inline JSON.
 resource "null_resource" "app_identifier_uris_win" {
-  count = length(var.saml_identifier_uris) > 0 && local.is_windows ? 1 : 0
+  count = local.is_windows ? 1 : 0
 
   triggers = {
     object_id       = azuread_application.this.object_id
     identifier_uris = jsonencode(var.saml_identifier_uris)
+    cert_thumbprint = var.saml_signing_certificate_enabled ? azuread_service_principal_token_signing_certificate.this[0].thumbprint : ""
   }
 
   provisioner "local-exec" {
@@ -184,14 +203,7 @@ resource "null_resource" "app_identifier_uris_win" {
       if (-not $result) {
         az login --service-principal --federated-token $env:ARM_OIDC_TOKEN --username $env:ARM_CLIENT_ID --tenant $env:ARM_TENANT_ID --allow-no-subscriptions | Out-Null
       }
-      $tmp = [System.IO.Path]::GetTempFileName()
-      try {
-        [System.IO.File]::WriteAllText($tmp, '{"applicationTemplateId": "8adf8e6e-67b2-4cf2-a259-e3dc5476c621"}')
-        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/${azuread_application.this.object_id}" --body "@$tmp" --headers "Content-Type=application/json"
-        if ($LASTEXITCODE -ne 0) { Write-Host "Note: applicationTemplateId already set, skipping" }
-      } finally {
-        Remove-Item $tmp -ErrorAction SilentlyContinue
-      }
+      %{~ if length(var.saml_identifier_uris) > 0}
       $tmp2 = [System.IO.Path]::GetTempFileName()
       try {
         [System.IO.File]::WriteAllText($tmp2, '{"identifierUris": ${jsonencode(var.saml_identifier_uris)}}')
@@ -206,6 +218,7 @@ resource "null_resource" "app_identifier_uris_win" {
       } finally {
         Remove-Item $tmp2 -ErrorAction SilentlyContinue
       }
+      %{~ endif}
       $tmp_sso = [System.IO.Path]::GetTempFileName()
       try {
         [System.IO.File]::WriteAllText($tmp_sso, '${local._saml_sso_config}')
@@ -214,6 +227,16 @@ resource "null_resource" "app_identifier_uris_win" {
       } finally {
         Remove-Item $tmp_sso -ErrorAction SilentlyContinue
       }
+      %{~ if var.saml_signing_certificate_enabled}
+      $tmp_cert = [System.IO.Path]::GetTempFileName()
+      try {
+        [System.IO.File]::WriteAllText($tmp_cert, '{"preferredTokenSigningKeyThumbprint": "${azuread_service_principal_token_signing_certificate.this[0].thumbprint}"}')
+        az rest --method PATCH --url "https://graph.microsoft.com/v1.0/servicePrincipals/${azuread_service_principal.this.object_id}" --body "@$tmp_cert" --headers "Content-Type=application/json"
+        if ($LASTEXITCODE -ne 0) { throw "preferredTokenSigningKeyThumbprint PATCH failed" }
+      } finally {
+        Remove-Item $tmp_cert -ErrorAction SilentlyContinue
+      }
+      %{~ endif}
     EOT
   }
 
@@ -237,7 +260,11 @@ resource "null_resource" "app_identifier_uris_win" {
     EOT
   }
 
-  depends_on = [azuread_application.this, azuread_service_principal.this]
+  depends_on = [
+    azuread_application.this,
+    azuread_service_principal.this,
+    azuread_service_principal_token_signing_certificate.this,
+  ]
 }
 
 # ---------------------------------------------------------------------------
@@ -249,6 +276,10 @@ resource "azuread_service_principal" "this" {
   app_role_assignment_required  = length(var.app_role_assignments) > 0
   preferred_single_sign_on_mode = "saml"
   notification_email_addresses  = var.notification_email_addresses
+
+  # use_existing adopts a pre-existing SP if one was created by template instantiation,
+  # rather than erroring. Safe to set unconditionally.
+  use_existing = true
 
   feature_tags {
     enterprise            = var.feature_tags.enterprise
