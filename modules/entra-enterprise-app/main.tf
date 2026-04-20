@@ -4,6 +4,12 @@ locals {
   # Detect Windows by checking for a drive-letter colon in the home path (C:\...)
   is_windows = substr(pathexpand("~"), 1, 1) == ":"
 
+  # The SAML template auto-creates a "User" role with its own GUID. When custom
+  # roles exist, assigning to 00000000... is invalid — use the template's role instead.
+  default_app_role_id = try(
+    [for r in azuread_service_principal.this.app_roles : r.id if r.display_name == "User"][0],
+    "00000000-0000-0000-0000-000000000000"
+  )
 }
 
 # ---------------------------------------------------------------------------
@@ -66,7 +72,9 @@ resource "azuread_application" "this" {
     # Prevent accidental rename which would break SSO.
     # Ignore template_id after creation — it's a ForceNew attribute and changing
     # it would destroy the app; existing apps migrating to v3 must destroy+recreate.
-    ignore_changes = [display_name, template_id]
+    # app_role: template auto-creates User and msiam_access roles; ignore prevents
+    # OpenTofu from stripping them on every apply.
+    ignore_changes = [display_name, template_id, app_role]
   }
 }
 
@@ -281,7 +289,7 @@ resource "azuread_app_role_assignment" "this" {
     a.principal_object_id => a
   }
 
-  app_role_id         = "00000000-0000-0000-0000-000000000000" # Default access role
+  app_role_id         = local.default_app_role_id
   principal_object_id = each.value.principal_object_id
   resource_object_id  = azuread_service_principal.this.object_id
 
